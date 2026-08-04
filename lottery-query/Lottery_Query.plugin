@@ -1,0 +1,9 @@
+#!name=五种彩票近15期查询
+#!desc=分段查询双色球、大乐透、福彩3D、排列三、七乐彩最近15期开奖号码及今日开奖号码；完整结果写入运行日志，通知正文适合快速查看。
+#!author=Minis
+#!homepage=https://github.com/onshine/ScriptHubs/tree/main/lottery-query
+#!icon=https://raw.githubusercontent.com/58xinian/icon/master/Two_color_ball.png
+#!loon_version=3.1.8(725)
+
+[Script]
+cron "30 21 * * *" script-path=https://raw.githubusercontent.com/onshine/ScriptHubs/main/lottery-query/lottery-query.js, timeout=300, tag=彩票查询
