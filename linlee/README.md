@@ -15,6 +15,7 @@ Loon / Quantumult X / Surge / Stash 签到与定时脚本合集。
 - 10 点抢单杯免单券 / 林里鸭游乐园周边（BoxJS 可分别开关）
 - **R11 起免维护**：token 保存满 20 小时自动预刷新；签到/兑换途中失效也会自动续期重试，不用再每天手动打开小程序
 - Cookie 存 Loon 持久化（`$persistentStore`），抓一次长期有效
+- R12 起抓包时自动把 referer/origin 规范为微信小程序指纹，避免隔天 9009「未知的请求来源」
 
 ### 原理（为什么 R11 不用手动开小程序）
 Loon 的 `http-request` 抓包规则按 URL 匹配，不区分请求来自小程序还是脚本。脚本用旧 token 主动请求商城/签到接口，触发抓包规则重跑 `captureCookie`，丘麦网关下发的新 token 即被合并保存——完成自动续期。
