@@ -1,21 +1,21 @@
 /**
- * 林里 · 每日签到与鸭币兑换 (R11 免维护版)
+ * 林里 · 每日签到与鸭币兑换 (R12 免维护版)
  *
- * 首次抓取:打开「林里」小程序 → 进入签到页,自动抓取 Cookie
- * 后续更新:R11 起无需再手动打开小程序——token 临期/失效时,脚本自动请求
- *           商城接口触发 Loon 抓包规则,实时刷新凭据后重试签到
- * 定时任务:每日签到;BoxJS 可分别开启免单券 / 周边兑换
+ * 版本: 2026-08-05.stable-r12.0
+ * 更新: R12 修复隔天 9009「未知的请求来源」——抓包时把 referer/origin
+ *       规范为微信小程序指纹;R11 已实现 token 临期/失效自动续期。
+ * 使用: 打开「林里」小程序 → 进入签到页抓取一次 Cookie,之后全程免维护。
  *
  * @Author: MaYIHEI <https://github.com/MaYIHEI/paperclip>
  * @Channel: Telegram 频道 https://t.me/mayihei
- * @Updated: 2026-07-16
+ * @Updated: 2026-08-05 (R12 by Minis)
  *
  * ===== Loon =====
  * [MITM]
  * hostname = webapi.qmai.cn
  * [Script]
- * http-request ^https:\/\/webapi\.qmai\.cn\/web\/(cmk-center\/sign\/(activityInfo|userSignStatistics|userSignRecordCalendar)|catering\/common\/common-info|mall-apiserver\/integral\/(home\/index|item\/goods(\/detail)?)) tag=林里 Cookie, script-path=https://raw.githubusercontent.com/MaYIHEI/paperclip/refs/heads/main/miniprogram/linli/linli.js, requires-body=true, img-url=https://raw.githubusercontent.com/MaYIHEI/pin/refs/heads/main/app/linli.png
- * cron "0 10 * * *" script-path=https://raw.githubusercontent.com/MaYIHEI/paperclip/refs/heads/main/miniprogram/linli/linli.js, tag=林里签到兑换, img-url=https://raw.githubusercontent.com/MaYIHEI/pin/refs/heads/main/app/linli.png, enable=true
+ * http-request ^https:\/\/webapi\.qmai\.cn\/web\/(cmk-center\/sign\/(activityInfo|userSignStatistics|userSignRecordCalendar)|catering\/common\/common-info|mall-apiserver\/integral\/(home\/index|item\/goods(\/detail)?)) tag=林里 Cookie, script-path=https://gist.githubusercontent.com/onshine/1c4061f48b31a607f705653f6e485933/raw/linlee.js, requires-body=true, img-url=https://raw.githubusercontent.com/MaYIHEI/pin/refs/heads/main/app/linli.png
+ * cron "0 10 * * *" script-path=https://gist.githubusercontent.com/onshine/1c4061f48b31a607f705653f6e485933/raw/linlee.js, tag=林里签到兑换, img-url=https://raw.githubusercontent.com/MaYIHEI/pin/refs/heads/main/app/linli.png, enable=true
  *
  * ===== Surge =====
  * [MITM]
@@ -54,7 +54,7 @@
 
 const $ = new Env("林里");
 
-const SCRIPT_VERSION = "2026-08-04.stable-r11.0"; // token 临期/失效自动刷新:脚本自触发抓包规则换 token,无需再手动打开小程序
+const SCRIPT_VERSION = "2026-08-05.stable-r12.2"; // R12.2 修复版:清掉 token 多大小写变体防真/假 token 并存触发 9009:打印来源头快照+抓包命中数,便于追查 9009;R12 规范化 referer/origin 为微信指纹
 $.log(`[INFO] 脚本版本 ${SCRIPT_VERSION}`);
 
 const CK_KEY = "linli_data";
@@ -69,6 +69,10 @@ const COMMON_INFO = "https://webapi.qmai.cn/web/catering/common/common-info";
 const DROP_HEADERS = ["content-length", "host", "connection", "accept-encoding"];
 const REFRESH_AGE = 20 * 3600 * 1000; // 凭据保存满 20 小时即视为临期,先刷新再签到
 const REFRESH_ROUNDS = 2;             // 失效后最多自动刷新轮数(每轮 4 个探测接口)
+// R12: 抓到请求后把 referer/origin 规范化为微信小程序官方指纹。
+// 问题根因:从小程序 webview 抓到的 referer 是 qmai 自己的 h5 域,隔天 WAF 拉黑 → 9009 未知来源。
+const QMAI_REFERER = "https://servicewechat.com/wx26c7aaacfa017719/32/page-frame.html";
+const SOURCE_ALIASES = { "referer": "referer", "referrer": "referer", "origin": "origin" };
 const EXCHANGE_TARGETS = [
     { key: TASK_COUPON, name: "单杯免单券", keywords: ["单杯免单券", "免单券", "单杯免单", "饮品免单"] },
     { key: TASK_TOY, name: "林里鸭游乐园周边", keywords: ["林里鸭游乐园周边", "鸭游乐园", "林里鸭", "游乐园周边"] },
@@ -87,13 +91,20 @@ function captureCookie() {
         const incoming = cleanHeaders(($request && $request.headers) || {});
         const old = parseJSON($.getdata(CK_KEY), {});
         // 不同接口分别携带 token、storeId、activityId，必须逐次合并，不能丢弃半成品。
-        const headers = Object.assign({}, old.headers || {}, incoming);
+        const merged = Object.assign({}, old.headers || {}, incoming);
+        // R12: 来源头统一规范为微信小程序指纹,否则隔天 WAF 9009
+        const appidForRef = first(parseBody($request.body).appid, parseQuery($request.url || "").appid, old.appid);
+        const headers = normalizeSource(merged, appidForRef);
         const lower = lowerKeys(headers);
         const body = parseBody($request.body);
         const query = parseQuery($request.url || "");
         const flat = {}; // R6 仅处理请求，不访问 Loon 请求环境中的空 $response
         const token = first(lower["qm-user-token"], body.qmUserToken, query.qmUserToken, flat.qmUserToken);
-        if (token && !lower["qm-user-token"]) headers["qm-user-token"] = String(token);
+        if (token) {
+            // R12.1: 清掉所有大小写变体再单写,避免 "Qm-User-Token:真/qm-user-token:假" 并存
+            Object.keys(headers).forEach((k) => { if (k.toLowerCase() === "qm-user-token") delete headers[k]; });
+            headers["qm-user-token"] = String(token);
+        }
         const activityId = first(body.activityId, query.activityId, lower["activity-id"], flat.activityId, old.activityId);
         const appid = first(body.appid, query.appid, lower.appid, flat.appid, old.appid, "wx26c7aaacfa017719");
         const storeId = first(lower["store-id"], body.storeId, query.storeId, flat.storeId, old.storeId);
@@ -134,6 +145,7 @@ function loadAuth() {
     const hitCount = Number($.getdata("linli_capture_hit") || 0);
     const auth = parseJSON(raw, {}) || {};
     const token = lowerKeys(auth.headers || {})["qm-user-token"] || "";
+    $.log(`[diag] 抓包规则累计命中 ${hitCount} 次(0 = 插件从未拦截到小程序请求)`);
     const missing = [];
     if (!token) missing.push("qm-user-token");
     if (!auth.storeId) missing.push("storeId");
@@ -221,6 +233,7 @@ async function refreshToken(auth, reason) {
 
 async function checkin(auth) {
     $.messages.push("", "========== 📅 每日签到 ==========");
+    diagHeaders(auth.headers); // R12
     const common = { activityId: auth.activityId, appid: auth.appid };
     let before = await api(SIGN_BASE + "/userSignStatistics", cleanHeaders(auth.headers), common);
     signLog(before, "userSignStatistics(before)");
@@ -428,8 +441,8 @@ function taskOn(key) {
 function assertAuth(res) {
     if (!res) throw new Error("网络无响应,请稍后重试");
     const message = String(res.message || "");
-    if (Number(res.code) === 9009 || /未知的请求来源/.test(message)) {
-        throw new Error("请求来源校验失败：请安装 R10.1，并重新进入签到有礼页面覆盖来源请求头");
+    if (Number(res.code) === 9009 || /未知的请求来源|请求来源/.test(message)) {
+        throw new Error("请求来源校验失败:R12 已自动规范来源头,请手动打开一次小程序签到页重新抓取凭据");
     }
     if ([9001, 10008, 41000, 100005].includes(Number(res.code)) || /token|登录|鉴权|未授权|失效|过期/i.test(message)) {
         throw new Error(`Cookie 已失效且自动刷新未成功,请打开一次林里小程序首页(无需进签到页): ${message || `code=${res.code}`}`);
@@ -460,6 +473,19 @@ function formatSignedStatus(res) {
     return formatStatus(`✨ 今日已签到${rewards.length ? `（${rewards.join("、")}）` : ""}`, res);
 }
 
+// R12 诊断:打印请求来源头快照(token 打码),便于定位 9009
+function diagHeaders(headers) {
+    const lower = lowerKeys(headers || {});
+    const keys = Object.keys(headers || {}).sort();
+    const lines = keys.map((k) => {
+        const v = String(headers[k] || "");
+        const show = /token|cookie|auth/i.test(k) ? `${v.slice(0, 4)}***len=${v.length}` : (v.length > 60 ? v.slice(0, 60) + "…" : v);
+        return `  ${k}: ${show}`;
+    });
+    $.log(`[diag] 凭据 header 快照(${keys.length} 个):\n${lines.join("\n")}`);
+    $.log(`[diag] 关键字段: has-token=${!!lower["qm-user-token"]} referer=${lower.referer || "无"} origin=${lower.origin || "无"} ua=${(lower["user-agent"] || "无").slice(0, 40)}`);
+}
+
 function firstNumber() {
     for (let i = 0; i < arguments.length; i++) {
         const n = Number(arguments[i]);
@@ -481,6 +507,28 @@ function cleanHeaders(raw) {
         out[key] = raw[key];
     });
     if (!lowerKeys(out)["content-type"]) out["content-type"] = "application/json";
+    return out;
+}
+
+// R12: 把 referer/origin 统一改写成微信小程序官方指纹,避免 WAF 隔天 9009。
+// 抓到 qmai 自家 h5 域的 referer 一律替换;实在没有来源头就补一个。
+function normalizeSource(headers, appid) {
+    const out = {};
+    const referer = `https://servicewechat.com/${appid || "wx26c7aaacfa017719"}/32/page-frame.html`;
+    let hasReferer = false, hasOrigin = false;
+    Object.keys(headers || {}).forEach((key) => {
+        const lower = key.toLowerCase();
+        if (lower === "referer" || lower === "referrer") {
+            out[key] = referer;
+            hasReferer = true;
+        } else if (lower === "origin") {
+            out[key] = "https://servicewechat.com";
+            hasOrigin = true;
+        } else {
+            out[key] = headers[key];
+        }
+    });
+    if (!hasReferer) out["referer"] = referer;
     return out;
 }
 
