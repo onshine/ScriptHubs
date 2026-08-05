@@ -1,9 +1,10 @@
 /**
  * 林里 · 每日签到与鸭币兑换 (R12 免维护版)
  *
- * 版本: 2026-08-05.stable-r12.0
- * 更新: R12 修复隔天 9009「未知的请求来源」——抓包时把 referer/origin
- *       规范为微信小程序指纹;R11 已实现 token 临期/失效自动续期。
+ * 版本: 2026-08-05.stable-r12.3
+ * 更新: R12.3 所有 header key 统一小写,根除大小写变体并存;
+ *       R12.2 修隔天 9009「未知的请求来源」——清掉 qm-user-token 多大小写变体;
+ *       R12   来源头规范为微信小程序指纹;R11 token 临期/失效自动续期。
  * 使用: 打开「林里」小程序 → 进入签到页抓取一次 Cookie,之后全程免维护。
  *
  * @Author: MaYIHEI <https://github.com/MaYIHEI/paperclip>
@@ -54,7 +55,7 @@
 
 const $ = new Env("林里");
 
-const SCRIPT_VERSION = "2026-08-05.stable-r12.2"; // R12.2 修复版:清掉 token 多大小写变体防真/假 token 并存触发 9009:打印来源头快照+抓包命中数,便于追查 9009;R12 规范化 referer/origin 为微信指纹
+const SCRIPT_VERSION = "2026-08-05.stable-r12.3"; // R12.2 修复版:清掉 token 多大小写变体防真/假 token 并存触发 9009:打印来源头快照+抓包命中数,便于追查 9009;R12 规范化 referer/origin 为微信指纹
 $.log(`[INFO] 脚本版本 ${SCRIPT_VERSION}`);
 
 const CK_KEY = "linli_data";
@@ -511,24 +512,17 @@ function cleanHeaders(raw) {
 }
 
 // R12: 把 referer/origin 统一改写成微信小程序官方指纹,避免 WAF 隔天 9009。
-// 抓到 qmai 自家 h5 域的 referer 一律替换;实在没有来源头就补一个。
+// R12.3: 所有 header key 统一小写——防止 "Accept"/"accept" 变体并存(虽 token 已修,但保险)。
 function normalizeSource(headers, appid) {
     const out = {};
     const referer = `https://servicewechat.com/${appid || "wx26c7aaacfa017719"}/32/page-frame.html`;
-    let hasReferer = false, hasOrigin = false;
     Object.keys(headers || {}).forEach((key) => {
         const lower = key.toLowerCase();
-        if (lower === "referer" || lower === "referrer") {
-            out[key] = referer;
-            hasReferer = true;
-        } else if (lower === "origin") {
-            out[key] = "https://servicewechat.com";
-            hasOrigin = true;
-        } else {
-            out[key] = headers[key];
-        }
+        if (lower === "referer" || lower === "referrer") out["referer"] = referer;
+        else if (lower === "origin") out["origin"] = "https://servicewechat.com";
+        else out[lower] = headers[key]; // 统一小写
     });
-    if (!hasReferer) out["referer"] = referer;
+    if (!out["referer"]) out["referer"] = referer;
     return out;
 }
 
