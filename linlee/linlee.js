@@ -1,11 +1,12 @@
 /**
  * 林里 · 每日签到与鸭币兑换 (R12 免维护版)
  *
- * 版本: 2026-08-05.stable-r12.3
- * 更新: R12.3 所有 header key 统一小写,根除大小写变体并存;
- *       R12.2 修隔天 9009「未知的请求来源」——清掉 qm-user-token 多大小写变体;
- *       R12   来源头规范为微信小程序指纹;R11 token 临期/失效自动续期。
- * 使用: 打开「林里」小程序 → 进入签到页抓取一次 Cookie,之后全程免维护。
+ * 版本: 2026-08-07.stable-r13.0
+ * 更新: R13 失效凭据立即清除 + 推送可点直达的醒目提醒,不再堆积 39h 脏数据;
+ *       R12.3 header key 统一小写,根除变体并存;R12 修隔天 9009 未知来源。
+ * 说明: 丘麦 token 过期后必须由微信登录换取,脚本无法自愈;R13 失效后第一时间
+ *       通过通知提醒你打开一次小程序(首页即可,无需进签到页)。
+ * 使用: 打开「林里」小程序 → 进入签到页抓取一次 Cookie。
  *
  * @Author: MaYIHEI <https://github.com/MaYIHEI/paperclip>
  * @Channel: Telegram 频道 https://t.me/mayihei
@@ -55,7 +56,7 @@
 
 const $ = new Env("林里");
 
-const SCRIPT_VERSION = "2026-08-05.stable-r12.3"; // R12.2 修复版:清掉 token 多大小写变体防真/假 token 并存触发 9009:打印来源头快照+抓包命中数,便于追查 9009;R12 规范化 referer/origin 为微信指纹
+const SCRIPT_VERSION = "2026-08-05.stable-r13.0"; // R12.2 修复版:清掉 token 多大小写变体防真/假 token 并存触发 9009:打印来源头快照+抓包命中数,便于追查 9009;R12 规范化 referer/origin 为微信指纹
 $.log(`[INFO] 脚本版本 ${SCRIPT_VERSION}`);
 
 const CK_KEY = "linli_data";
@@ -159,11 +160,22 @@ function loadAuth() {
     return auth;
 }
 
-// ================= R11: token 自动刷新 =================
-// 原理:Loon 的 http-request 抓包规则按 URL 匹配,不区分请求来自小程序还是脚本。
-// 脚本用旧凭据请求抓包规则覆盖的接口(common-info、商城首页/详情、签到统计),
-// Loon 会重新拉起本脚本的 captureCookie:此时丘麦网关若已给请求换上新 token,
-// 新凭据即被合并保存——无需再手动打开小程序。
+// ================= R13: token 失效治理 =================
+// R11 的"脚本自刷新"设计假设:网关会在请求里下发新 token —— 实测不会,
+// 过期必须由小程序重新走微信登录。因此 R13:
+//   1) 刷新重试从 2 轮减为 1 轮(两轮无用且拖慢 cron)
+//   2) 凭据失效立即清除,避免"凭据已保存 39.5h"这类脏数据越攒越久
+//   3) 失败推送改为可点直达小程序登录页的通知
+
+function discardAuth(reason) {
+    $.setdata("", CK_KEY);
+    $.log(`[auth] 已清除失效凭据(${reason}),打开小程序任一页面即重新抓取`);
+}
+
+function notifyNeedLogin(why) {
+    $.msg($.name, "⏰ 林里 token 已失效", `${why} — 点我打开林里小程序(首页/签到页都行),抓包规则自动补抓`, { "open-url": "https://m.qmai.cn/linlee" });
+    $.messages.push(`⏰ ${why}`);
+}
 
 function rawPost(url, headers, body) {
     return new Promise((resolve) => {
@@ -197,6 +209,7 @@ function refreshOn(key) {
     return !(value === false || value === 0 || value === "false" || value === "0");
 }
 
+// R13: 只保留 1 轮,失败即由 checkin 上层清凭据并推送醒目提醒
 async function refreshToken(auth, reason) {
     if (!refreshOn(CK_REFRESH)) {
         $.log("[refresh] 自动刷新已被 BoxJS/Argument 关闭,跳过");
@@ -210,27 +223,23 @@ async function refreshToken(auth, reason) {
         { url: MALL_BASE + "/item/goods/detail", body: { appid: auth.appid, goodsId: "0" } },
         { url: SIGN_BASE + "/userSignStatistics", body: { appid: auth.appid, activityId: auth.activityId } },
     ];
-    for (let round = 1; round <= REFRESH_ROUNDS; round++) {
-        $.log(`[refresh] 第 ${round}/${REFRESH_ROUNDS} 轮自动刷新(${reason}):自触发抓包规则换取新 token`);
-        for (const probe of probes) {
-            const sep = probe.url.includes("?") ? "&" : "?";
-            await rawPost(`${probe.url}${sep}linli-refresh=1`, headers, probe.body);
-            const fresh = parseJSON($.isNode() ? process.env.LINLI_DATA : $.getdata(CK_KEY), {});
-            const freshToken = lowerKeys(fresh.headers || {})["qm-user-token"] || "";
-            const oldToken = lowerKeys(auth.headers || {})["qm-user-token"] || "";
-            if (freshToken && freshToken !== oldToken && fresh.activityId && fresh.storeId) {
-                const age = auth.capturedAt ? Math.round((Date.now() - Number(auth.capturedAt)) / 360000) / 10 : "?";
-                $.log(`[refresh] ✅ 已捕获新 token(旧 token 存活约 ${age} 小时),继续执行`);
-                $.msg($.name, "♻️ 已自动续期", `旧 token 存活约 ${age} 小时,新 token 已落盘`);
-                return true;
-            }
+    $.log(`[refresh] 自触发抓包规则试一轮(${reason})...`);
+    for (const probe of probes) {
+        const sep = probe.url.includes("?") ? "&" : "?";
+        await rawPost(`${probe.url}${sep}linli-refresh=1`, headers, probe.body);
+        const fresh = parseJSON($.isNode() ? process.env.LINLI_DATA : $.getdata(CK_KEY), {});
+        const freshToken = lowerKeys(fresh.headers || {})["qm-user-token"] || "";
+        const oldToken = lowerKeys(auth.headers || {})["qm-user-token"] || "";
+        if (freshToken && freshToken !== oldToken && fresh.activityId && fresh.storeId) {
+            const age = auth.capturedAt ? Math.round((Date.now() - Number(auth.capturedAt)) / 360000) / 10 : "?";
+            $.log(`[refresh] ✅ 捕获新 token(旧 token 存活约 ${age} 小时),继续执行`);
+            return true;
         }
-        await $.wait(800);
     }
-    $.log("[refresh] ❌ 自动刷新未成功:网关未在请求中下发新 token,仍需手动打开一次小程序");
+    $.log("[refresh] ❌ 网关未下发新 token(预期内):token 过期必须由小程序重新登录");
     return false;
 }
-// ================= R11 end =================
+// ================= R13 end =================
 
 async function checkin(auth) {
     $.messages.push("", "========== 📅 每日签到 ==========");
@@ -239,13 +248,21 @@ async function checkin(auth) {
     let before = await api(SIGN_BASE + "/userSignStatistics", cleanHeaders(auth.headers), common);
     signLog(before, "userSignStatistics(before)");
 
-    // R11: token 失效 → 自触发抓包规则换新 token,重读凭据后重试一次
-    if (isAuthFail(before) && (await refreshToken(auth, "签到前校验失效"))) {
-        auth = loadAuth();
-        before = await api(SIGN_BASE + "/userSignStatistics", cleanHeaders(auth.headers), common);
-        signLog(before, "userSignStatistics(retry)");
+    // R13: token 失效 → 先试一轮自动续期;仍失败 → 清凭据 + 推送可点直达的通知
+    if (isAuthFail(before)) {
+        const refreshed = await refreshToken(auth, "签到前校验失效");
+        if (refreshed) {
+            auth = loadAuth();
+            before = await api(SIGN_BASE + "/userSignStatistics", cleanHeaders(auth.headers), common);
+            signLog(before, "userSignStatistics(retry)");
+        }
+        if (isAuthFail(before)) {
+            const age = auth.capturedAt ? Math.round((Date.now() - Number(auth.capturedAt)) / 360000) / 10 : "?";
+            discardAuth(`token 失效,已存 ${age} 小时`);
+            notifyNeedLogin(`凭据已存 ${age} 小时后失效,请重新进入小程序抓取`);
+            return;
+        }
     }
-    assertAuth(before);
 
     if (!before || before.status !== true) {
         throw new Error(`签到状态查询失败: ${(before && before.message) || short(before)}`);
@@ -262,15 +279,24 @@ async function checkin(auth) {
     });
     signLog(sign, "takePartInSign");
 
-    // R11: 签到请求途中 token 才过期(如 10 点整高并发被挤下线),再刷新重试一次
-    if (isAuthFail(sign) && (await refreshToken(auth, "签到请求失效"))) {
-        auth = loadAuth();
-        sign = await api(SIGN_BASE + "/takePartInSign", cleanHeaders(auth.headers), {
-            activityId: auth.activityId,
-            storeId: auth.storeId,
-            appid: auth.appid,
-        });
-        signLog(sign, "takePartInSign(retry)");
+    // R13: 签到请求途中 token 失效 → 先试一轮,仍失败 → 清凭据推送醒目提醒
+    if (isAuthFail(sign)) {
+        const refreshed = await refreshToken(auth, "签到请求失效");
+        if (refreshed) {
+            auth = loadAuth();
+            sign = await api(SIGN_BASE + "/takePartInSign", cleanHeaders(auth.headers), {
+                activityId: auth.activityId,
+                storeId: auth.storeId,
+                appid: auth.appid,
+            });
+            signLog(sign, "takePartInSign(retry)");
+        }
+        if (isAuthFail(sign)) {
+            const age = auth.capturedAt ? Math.round((Date.now() - Number(auth.capturedAt)) / 360000) / 10 : "?";
+            discardAuth(`签到请求时 token 失效,已存 ${age} 小时`);
+            notifyNeedLogin(`签到请求时 token 失效(存 ${age} 小时),请重新进入小程序抓取`);
+            return;
+        }
     }
     assertAuth(sign);
 
@@ -609,11 +635,10 @@ if (typeof $request !== "undefined") {
     (async () => {
         if (maybeClear()) return;
         let auth = loadAuth();
-        // R11: 凭据保存满 20 小时即临期,先自动换新再签到,避开 10 点整的失效高峰
+        // R13: 凭据满 20 小时仅打诊断,不再动作(实测网关不下发,预刷无用;真正的失效校验在 checkin 里)
         const age = Date.now() - Number(auth.capturedAt || 0);
         if (age > REFRESH_AGE) {
-            $.log(`[refresh] 凭据已保存 ${Math.round(age / 360000) / 10} 小时(>${REFRESH_AGE / 3600000} 小时),签到前预刷新`);
-            if (await refreshToken(auth, "凭据临期")) auth = loadAuth();
+            $.log(`[warn] 凭据已保存 ${Math.round(age / 360000) / 10} 小时(>${REFRESH_AGE / 3600000} 小时),即将进入签到;失效时会清据并推送提醒`);
         }
         try {
             await exchange(auth);
