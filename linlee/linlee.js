@@ -1,12 +1,12 @@
 /**
  * 林里 · 每日签到与鸭币兑换 (R12 免维护版)
  *
- * 版本: 2026-08-07.stable-r13.0
- * 更新: R13 失效凭据立即清除 + 推送可点直达的醒目提醒,不再堆积 39h 脏数据;
- *       R12.3 header key 统一小写,根除变体并存;R12 修隔天 9009 未知来源。
- * 说明: 丘麦 token 过期后必须由微信登录换取,脚本无法自愈;R13 失效后第一时间
- *       通过通知提醒你打开一次小程序(首页即可,无需进签到页)。
- * 使用: 打开「林里」小程序 → 进入签到页抓取一次 Cookie。
+ * 版本: 2026-08-07.stable-r13.1
+ * 更新: R13.1 抓包时剔除 sec-fetch 系列/dnt 等浏览器专用头,避免 WAF 按跨站图片加载拦截(9009);
+ *       R13   失效凭据立即清除 + 推送可点直达提醒;R12.x 统一 header 小写、规范 referer/origin。
+ * 说明: 丘麦风控每日调整,无任何版本能承诺"抓一次长期免维护"。
+ *       token 有效期内脚本纯自动;失效后推送提醒你手动打开一次小程序首页(无需进签到页)。
+ * 使用: 打开「林里」小程序 → 进入签到页抓取一次 Cookie(token 有效期 24~72 小时,失效会推送提醒)。
  *
  * @Author: MaYIHEI <https://github.com/MaYIHEI/paperclip>
  * @Channel: Telegram 频道 https://t.me/mayihei
@@ -56,7 +56,7 @@
 
 const $ = new Env("林里");
 
-const SCRIPT_VERSION = "2026-08-05.stable-r13.0"; // R12.2 修复版:清掉 token 多大小写变体防真/假 token 并存触发 9009:打印来源头快照+抓包命中数,便于追查 9009;R12 规范化 referer/origin 为微信指纹
+const SCRIPT_VERSION = "2026-08-05.stable-r13.1"; // R12.2 修复版:清掉 token 多大小写变体防真/假 token 并存触发 9009:打印来源头快照+抓包命中数,便于追查 9009;R12 规范化 referer/origin 为微信指纹
 $.log(`[INFO] 脚本版本 ${SCRIPT_VERSION}`);
 
 const CK_KEY = "linli_data";
@@ -69,6 +69,8 @@ const SIGN_BASE = "https://webapi.qmai.cn/web/cmk-center/sign";
 const MALL_BASE = "https://webapi.qmai.cn/web/mall-apiserver/integral";
 const COMMON_INFO = "https://webapi.qmai.cn/web/catering/common/common-info";
 const DROP_HEADERS = ["content-length", "host", "connection", "accept-encoding"];
+// R13: 以下浏览器/图片加载专用头,会把请求指纹搞成跨站图片加载,导致 WAF 拦(9009)
+const BROWSER_ONLY_HEADERS = ["sec-fetch-dest", "sec-fetch-mode", "sec-fetch-site", "sec-fetch-user", "upgrade-insecure-requests", "dnt", "accept-encoding"];
 const REFRESH_AGE = 20 * 3600 * 1000; // 凭据保存满 20 小时即视为临期,先刷新再签到
 const REFRESH_ROUNDS = 2;             // 失效后最多自动刷新轮数(每轮 4 个探测接口)
 // R12: 抓到请求后把 referer/origin 规范化为微信小程序官方指纹。
@@ -531,6 +533,7 @@ function cleanHeaders(raw) {
     Object.keys(raw || {}).forEach((key) => {
         if (key.startsWith(":")) return;
         if (DROP_HEADERS.includes(key.toLowerCase())) return;
+        if (BROWSER_ONLY_HEADERS.includes(key.toLowerCase())) return; // R13 除浏览器指纹
         out[key] = raw[key];
     });
     if (!lowerKeys(out)["content-type"]) out["content-type"] = "application/json";
