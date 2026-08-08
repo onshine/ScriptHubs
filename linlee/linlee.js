@@ -1,12 +1,12 @@
 /**
  * 林里 · 每日签到与鸭币兑换 (R12 免维护版)
  *
- * 版本: 2026-08-07.stable-r13.1
- * 更新: R13.1 抓包时剔除 sec-fetch 系列/dnt 等浏览器专用头,避免 WAF 按跨站图片加载拦截(9009);
- *       R13   失效凭据立即清除 + 推送可点直达提醒;R12.x 统一 header 小写、规范 referer/origin。
- * 说明: 丘麦风控每日调整,无任何版本能承诺"抓一次长期免维护"。
- *       token 有效期内脚本纯自动;失效后推送提醒你手动打开一次小程序首页(无需进签到页)。
- * 使用: 打开「林里」小程序 → 进入签到页抓取一次 Cookie(token 有效期 24~72 小时,失效会推送提醒)。
+ * 版本: 2026-08-07.stable-r13.2
+ * 说明: 丘麦每日风控调整,无任何版本能承诺"抓一次长期免维护"。token 有效(约 24~72h)时纯自动;
+ *       活动到期/失效会推送可点通知——打开小程序首页/签到页即自动补抓,不用进签到页。
+ * 更新: R13.2 新增"120015 活动不存在"检测——商家换期时推送提醒,避免用过期 ID 反复签到失败;
+ *       R13.1 剔除 sec-fetch 系列/dnt 等浏览器专用头;R12 header 小写+规范参考源。
+ * 使用: 打开「林里」小程序 → 进入签到页抓取一次 Cookie。
  *
  * @Author: MaYIHEI <https://github.com/MaYIHEI/paperclip>
  * @Channel: Telegram 频道 https://t.me/mayihei
@@ -56,7 +56,7 @@
 
 const $ = new Env("林里");
 
-const SCRIPT_VERSION = "2026-08-05.stable-r13.1"; // R12.2 修复版:清掉 token 多大小写变体防真/假 token 并存触发 9009:打印来源头快照+抓包命中数,便于追查 9009;R12 规范化 referer/origin 为微信指纹
+const SCRIPT_VERSION = "2026-08-05.stable-r13.2"; // R12.2 修复版:清掉 token 多大小写变体防真/假 token 并存触发 9009:打印来源头快照+抓包命中数,便于追查 9009;R12 规范化 referer/origin 为微信指纹
 $.log(`[INFO] 脚本版本 ${SCRIPT_VERSION}`);
 
 const CK_KEY = "linli_data";
@@ -109,12 +109,14 @@ function captureCookie() {
             Object.keys(headers).forEach((k) => { if (k.toLowerCase() === "qm-user-token") delete headers[k]; });
             headers["qm-user-token"] = String(token);
         }
-        const activityId = first(body.activityId, query.activityId, lower["activity-id"], flat.activityId, old.activityId);
+        // R13.2: 活动 ID 优先取本次请求,若没带且与旧的不一致则清空,避免商家换期后仍用过期 ID
+        const incomingActivityId = first(body.activityId, query.activityId, lower["activity-id"], flat.activityId);
+        const activityId = incomingActivityId || (old.activityId && !isActivityEnded(old) ? old.activityId : "");
         const appid = first(body.appid, query.appid, lower.appid, flat.appid, old.appid, "wx26c7aaacfa017719");
         const storeId = first(lower["store-id"], body.storeId, query.storeId, flat.storeId, old.storeId);
         const oldToken = lowerKeys(old.headers || {})["qm-user-token"] || "";
         const wasComplete = !!(oldToken && old.activityId && old.storeId && old.appid);
-        const data = { headers, activityId: String(activityId || ""), storeId: String(storeId || ""), appid: String(appid), capturedAt: Date.now() };
+        const data = { headers, activityId: String(activityId || ""), storeId: String(storeId || ""), appid: String(appid), capturedAt: Date.now(), lastError: old.lastError || 0 };
 
         const saved = $.setdata(JSON.stringify(data), CK_KEY);
         if (!saved) throw new Error("凭据写入失败");
@@ -201,6 +203,11 @@ function isAuthFail(res) {
     return [9001, 10008, 41000, 100005].includes(Number(res.code)) || /token|登录|鉴权|未授权|失效|过期/i.test(message);
 }
 
+// R13.2: 判断上次保存的 activityId 是否疑似结束(120015 活动不存在)
+function isActivityEnded(old) {
+    return !!(old && old.activityId && old.lastError === 120015);
+}
+
 function refreshOn(key) {
     if (typeof $argument !== "undefined" && $argument && Object.prototype.hasOwnProperty.call($argument, key)) {
         const arg = $argument[key];
@@ -261,9 +268,20 @@ async function checkin(auth) {
         if (isAuthFail(before)) {
             const age = auth.capturedAt ? Math.round((Date.now() - Number(auth.capturedAt)) / 360000) / 10 : "?";
             discardAuth(`token 失效,已存 ${age} 小时`);
-            notifyNeedLogin(`凭据已存 ${age} 小时后失效,请重新进入小程序抓取`);
+            notifyNeedLogin(`凭据已存 ${age} 小时后失效,请重新进入小程序首页抓取`);
             return;
         }
+    }
+
+    // R13.2: 120015 活动不存在 —— 商家换了新一期活动,标记旧 ID 已过期,提醒重抓
+    if (before && Number(before.code) === 120015) {
+        $.log(`[activity] 检测到原签到活动 ID ${auth.activityId} 已结束,请在小程序里重新进入签到页,自动捕获新 ID`);
+        // 标记旧 activityId 已失效,同时保存(留着 token/storeId 下次合并新 ID)
+        const updated = Object.assign({}, parseJSON($.getdata(CK_KEY), {}), { lastError: 120015 });
+        $.setdata(JSON.stringify(updated), CK_KEY);
+        $.msg($.name, "🔁 签到活动已换期", `原活动 ID ${auth.activityId} 已结束;请打开小程序 → 签到页,自动抓新活动 ID`);
+        $.messages.push(`🔁 签到活动已换期,请打开小程序签到页重新抓取`);
+        return;
     }
 
     if (!before || before.status !== true) {
