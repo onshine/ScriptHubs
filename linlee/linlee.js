@@ -56,7 +56,7 @@
 
 const $ = new Env("林里");
 
-const SCRIPT_VERSION = "2026-08-05.stable-r13.2"; // R12.2 修复版:清掉 token 多大小写变体防真/假 token 并存触发 9009:打印来源头快照+抓包命中数,便于追查 9009;R12 规范化 referer/origin 为微信指纹
+const SCRIPT_VERSION = "2026-08-07.stable-r14.0"; // R14: 120015 自动拉当前活动 ID 换期免手动; header 严格白名单防 9009
 $.log(`[INFO] 脚本版本 ${SCRIPT_VERSION}`);
 
 const CK_KEY = "linli_data";
