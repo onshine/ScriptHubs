@@ -1,12 +1,12 @@
 /**
  * 林里 · 每日签到与鸭币兑换 (R12 免维护版)
  *
- * 版本: 2026-08-07.stable-r13.2
- * 说明: 丘麦每日风控调整,无任何版本能承诺"抓一次长期免维护"。token 有效(约 24~72h)时纯自动;
- *       活动到期/失效会推送可点通知——打开小程序首页/签到页即自动补抓,不用进签到页。
- * 更新: R13.2 新增"120015 活动不存在"检测——商家换期时推送提醒,避免用过期 ID 反复签到失败;
- *       R13.1 剔除 sec-fetch 系列/dnt 等浏览器专用头;R12 header 小写+规范参考源。
- * 使用: 打开「林里」小程序 → 进入签到页抓取一次 Cookie。
+ * 版本: 2026-08-07.stable-r14.0
+ * 说明: R14 起签到活动 ID 改为动态获取——商家换期(120015)时脚本自动拉当前进行中活动,不再需要你手动开小程序。
+ *       token 失效仍会推送可点提醒(token 过期必须微信登录,脚本无法自愈)。
+ * 更新: R14 120015 自动拉当前活动换期;请求头严格白名单化(只留纯 API 指纹,杜绝 WAF 9009);
+ *       R13.2 旧"活动结束手动重抓"改为 R14 自动动态获取并覆盖。
+ * 使用: 打开「林里」小程序 → 进入签到页抓取一次 Cookie。之后商家换期脚本自动跟着走。
  *
  * @Author: MaYIHEI <https://github.com/MaYIHEI/paperclip>
  * @Channel: Telegram 频道 https://t.me/mayihei
@@ -273,15 +273,35 @@ async function checkin(auth) {
         }
     }
 
-    // R13.2: 120015 活动不存在 —— 商家换了新一期活动,标记旧 ID 已过期,提醒重抓
+    // R14: 120015 活动不存在 —— 直接向服务器问当前进行中的签到活动,动态替换,不用手动开小程序
     if (before && Number(before.code) === 120015) {
-        $.log(`[activity] 检测到原签到活动 ID ${auth.activityId} 已结束,请在小程序里重新进入签到页,自动捕获新 ID`);
-        // 标记旧 activityId 已失效,同时保存(留着 token/storeId 下次合并新 ID)
-        const updated = Object.assign({}, parseJSON($.getdata(CK_KEY), {}), { lastError: 120015 });
-        $.setdata(JSON.stringify(updated), CK_KEY);
-        $.msg($.name, "🔁 签到活动已换期", `原活动 ID ${auth.activityId} 已结束;请打开小程序 → 签到页,自动抓新活动 ID`);
-        $.messages.push(`🔁 签到活动已换期,请打开小程序签到页重新抓取`);
-        return;
+        $.log(`[activity] 原签到活动 ID ${auth.activityId} 已结束,动态获取当前活动...`);
+        const list = await api(SIGN_BASE + "/activityList", cleanHeaders(auth.headers), {
+            appid: auth.appid, storeId: auth.storeId,
+        });
+        signLog(list, "activityList");
+        const items = (list && list.data && (Array.isArray(list.data) ? list.data : list.data.list)) || [];
+        const now = Date.now();
+        const active = items.find((it) => {
+            const st = Number(it.status);
+            const startOk = !it.startTime || now >= Number(it.startTime);
+            const endOk = !it.endTime || now <= Number(it.endTime);
+            return (st === 1 || st === 2) && startOk && endOk;
+        });
+        if (active && active.activityId) {
+            const updated = Object.assign({}, auth, { activityId: String(active.activityId), lastError: 0 });
+            $.setdata(JSON.stringify(updated), CK_KEY);
+            $.log(`[activity] ✅ 已动态获取当前活动 ID: ${active.activityId}`);
+            $.msg($.name, "🔁 签到活动已自动换期", `旧 ID ${auth.activityId} → 新 ID ${active.activityId}`);
+            before = await api(SIGN_BASE + "/userSignStatistics", cleanHeaders(auth.headers), {
+                activityId: String(active.activityId), appid: auth.appid,
+            });
+            signLog(before, "userSignStatistics(new activity)");
+        } else {
+            $.log(`[activity] ❌ 当前无进行中的签到活动(可能就是没开一期),请稍后关注`);
+            $.messages.push(`🔁 签到活动临时下线,稍后自动再试`);
+            return;
+        }
     }
 
     if (!before || before.status !== true) {
@@ -558,18 +578,22 @@ function cleanHeaders(raw) {
     return out;
 }
 
-// R12: 把 referer/origin 统一改写成微信小程序官方指纹,避免 WAF 隔天 9009。
-// R12.3: 所有 header key 统一小写——防止 "Accept"/"accept" 变体并存(虽 token 已修,但保险)。
+// R14: 彻底白名单——只保留微信小程序纯 API 指纹;浏览器印刷头(sec-fetch 等)全不存。
+// 否则抓到图片/网页请求会把 sec-fetch-site:cross-site 这类指纹烙进凭据,WAF 隔天 9009。
 function normalizeSource(headers, appid) {
-    const out = {};
-    const referer = `https://servicewechat.com/${appid || "wx26c7aaacfa017719"}/32/page-frame.html`;
-    Object.keys(headers || {}).forEach((key) => {
-        const lower = key.toLowerCase();
-        if (lower === "referer" || lower === "referrer") out["referer"] = referer;
-        else if (lower === "origin") out["origin"] = "https://servicewechat.com";
-        else out[lower] = headers[key]; // 统一小写
-    });
-    if (!out["referer"]) out["referer"] = referer;
+    const src = lowerKeys(headers || {});
+    const out = {
+        "qm-from": src["qm-from"] || "wechat",
+        "qm-from-type": src["qm-from-type"] || "catering",
+        "store-id": src["store-id"] || "",
+        "referer": `https://servicewechat.com/${appid || "wx26c7aaacfa017719"}/32/page-frame.html`,
+        "origin": "https://servicewechat.com",
+        "content-type": src["content-type"] || "application/json",
+        "accept": src["accept"] || "*/*",
+        "accept-language": src["accept-language"] || "zh-CN",
+        "user-agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 16_6_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 MicroMessenger/8.0.50",
+    };
+    if (src["qm-user-token"]) out["qm-user-token"] = String(src["qm-user-token"]);
     return out;
 }
 
