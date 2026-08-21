@@ -1,0 +1,16 @@
+#!name=Gemini API 多节点巡检
+#!desc=定时探测自建 gemini-web2api-go 节点（支持 IPv6 多台小鸡），检查存活、版本、模型数、API Key 有效性、Cookie 是否过期导致 Pro 降级、是否被限流；异常时推送通知。多节点部署运维刚需。
+#!author=Minis
+#!homepage=https://github.com/onshine/ScriptHubs/tree/main/gemini-web2api
+#!icon=https://www.google.com/s2/favicons?domain=gemini.google.com&sz=128
+#!loon_version=3.2.1(734)
+
+[Argument]
+nodes = input,"",tag=节点列表,desc=格式：别名|http://[v6地址]:8084|sk-gemini-xxx，多个节点用英文逗号分隔。API Key 可省略（省略则只做存活检查）
+cron = input,"0 */6 * * *",tag=巡检周期,desc=cron 表达式，默认每 6 小时巡检一次
+timeout = input,"15",tag=单节点超时秒数,desc=默认 15 秒，纯 IPv6 链路慢可调大
+probe_pro = select,"true","false",tag=深度检查 Pro,desc=true 时会真发一次 gemini-3.1-pro 请求确认 Cookie 未过期（会消耗 1 次配额）
+notify_ok = select,"false","true",tag=正常时也通知,desc=默认仅异常推送；true 则每次巡检都推送
+
+[Script]
+cron {cron} script-path=https://raw.githubusercontent.com/onshine/ScriptHubs/main/gemini-web2api/gemini-api-monitor.js, timeout=120, argument=[{"nodes":"{nodes}","timeout":"{timeout}","probe_pro":"{probe_pro}","notify_ok":"{notify_ok}"}], tag=GeminiAPI巡检
