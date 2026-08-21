@@ -15,11 +15,12 @@
 #   ./gw.sh creds           查看 Token / API Key / 面板地址
 #   ./gw.sh rotate          轮换 API Key
 #   ./gw.sh openport        放行防火墙端口
+#   ./gw.sh clearstatic     清空「静态代理」兜底设置
 #   ./gw.sh uninstall       卸载主控
 #
 # 仓库：https://github.com/onshine/ScriptHubs/tree/main/gemini-web2api
 set -e
-SCRIPT_VERSION="R1.8.0"
+SCRIPT_VERSION="R1.8.1"
 RAWBASE="https://raw.githubusercontent.com/onshine/ScriptHubs/main/gemini-web2api"
 WORK=/usr/local/share/gemini-web2api
 DIR=/opt/gemini-web2api
@@ -96,6 +97,14 @@ show_status() {
           | grep -o '"id"' | wc -l)
       echo "代理池      : $N 个"
       [ "$N" = "0" ] && echo "              （池空 = 走主控本机 IP 直连，正常）"
+      # 静态代理是隐藏坑：池全满/熔断时会回退到它，填错会让请求失败
+      SP=$(curl -s --max-time 8 -H "Authorization: Bearer $ADMIN_TOKEN" \
+           "http://127.0.0.1:$PORT/admin/api/config" 2>/dev/null \
+           | python3 -c 'import json,sys; print(json.load(sys.stdin).get("config",{}).get("proxy",""))' 2>/dev/null)
+      if [ -n "$SP" ]; then
+        echo "静态代理    : ⚠️ $SP"
+        echo "              （池全满时的兜底出口；不用请执行 ./gw.sh clearstatic）"
+      fi
       LV4=$(local_v4); LV6=$(local_v6)
       PV4=$(pub_v4);   PV6=$(pub_v6)
       echo "-------------------------------------------"
@@ -247,6 +256,44 @@ open_port() {
   fi
 }
 
+clear_static() {
+  [ -f "$DIR/.credentials" ] || { echo "❌ 主控未安装"; return 1; }
+  . "$DIR/.credentials"; [ -n "$PORT" ] || PORT=8084
+  B="http://127.0.0.1:$PORT"; A="Authorization: Bearer $ADMIN_TOKEN"
+  command -v python3 >/dev/null 2>&1 || { echo "需要 python3"; return 1; }
+
+  echo "检查「静态代理」设置..."
+  echo "（它是代理池全满/全熔断时的兜底出口。填了坏地址会导致请求失败，"
+  echo "  且面板请求记录的出口列会误显示为「直连」）"
+  echo
+  CUR=$(curl -s --max-time 10 -H "$A" "$B/admin/api/config" 2>/dev/null)
+  [ -n "$CUR" ] || { echo "❌ 读取配置失败"; return 1; }
+  VAL=$(printf '%s' "$CUR" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("config",{}).get("proxy",""))' 2>/dev/null)
+  if [ -z "$VAL" ]; then
+    echo "✅ 静态代理已是空的，无需处理"
+    return 0
+  fi
+  echo "当前值: $VAL"
+  printf "清空它？[y/N] "
+  read -r yn
+  [ "$yn" = "y" ] || [ "$yn" = "Y" ] || { echo "已取消"; return 0; }
+
+  # PUT 是整体替换，必须先读全量配置再只改 proxy 一项
+  printf '%s' "$CUR" | python3 -c '
+import json,sys
+c=json.load(sys.stdin).get("config",{})
+c["proxy"]=""
+json.dump(c,sys.stdout)' > /tmp/gw_cfg.json 2>/dev/null
+  curl -s --max-time 10 -X PUT -H "$A" -H "Content-Type: application/json" \
+    -d @/tmp/gw_cfg.json "$B/admin/api/config" 2>/dev/null \
+  | python3 -c '
+import json,sys
+try: d=json.load(sys.stdin)
+except Exception: print("❌ 响应解析失败"); sys.exit()
+print("✅ 已清空静态代理" if d.get("ok") else "❌ 失败: "+json.dumps(d,ensure_ascii=False))'
+  rm -f /tmp/gw_cfg.json
+}
+
 do_uninstall() {
   printf "确认卸载主控？数据库和凭据都会删除 [y/N] "
   read -r yn
@@ -284,10 +331,11 @@ case "$1" in
   creds|token) show_creds;                exit $? ;;
   rotate)    rotate_key;                  exit $? ;;
   openport|firewall) open_port;           exit $? ;;
+  clearstatic|nostatic) clear_static;     exit $? ;;
   uninstall) do_uninstall;                exit 0  ;;
   ""|menu)   : ;;
   *) echo "未知命令: $1"
-     echo "可用: master outbound addproxy local check fix status creds rotate openport uninstall"; exit 1 ;;
+     echo "可用: master outbound addproxy local check fix status creds rotate openport clearstatic uninstall"; exit 1 ;;
 esac
 
 # ── 交互菜单 ─────────────────────────────────────────────────
@@ -306,10 +354,11 @@ while :; do
   echo "  8) 查看凭据（Token / API Key）"
   echo "  9) 轮换 API Key"
   echo " 10) 放行防火墙端口（客户端连不上时用）"
-  echo " 11) 卸载"
+  echo " 11) 清空「静态代理」兜底设置"
+  echo " 12) 卸载"
   echo "  0) 退出"
   echo
-  printf "选择 [0-11]: "
+  printf "选择 [0-12]: "
   read -r c
   echo
   case "$c" in
@@ -326,7 +375,8 @@ while :; do
     8) show_creds ;;
     9) rotate_key ;;
     10) open_port ;;
-    11) do_uninstall ;;
+    11) clear_static ;;
+    12) do_uninstall ;;
     0) echo "再见"; exit 0 ;;
     *) echo "无效选择" ;;
   esac

@@ -7,7 +7,7 @@ Loon / Quantumult X / Surge 签到与定时脚本合集。
 - [linlee](linlee/) — 林里柠檬茶每日签到 + 10点鸭币兑换。R11 免维护版，token 临期自动续期。
 - [bingcn](bingcn/) — 必应中国多源唯一搜索 V6，Loon/Quantumult X 定时脚本 + 插件。
 - [lottery-query](lottery-query/) — 多彩票开奖查询。
-- [gemini-web2api](gemini-web2api/) — Gemini 网页端反代 OpenAI API 的小鸡部署套件。R1.8.0，gw.sh 菜单式一键管理（主控/出口/代理池/体检），含健康巡检插件。
+- [gemini-web2api](gemini-web2api/) — Gemini 网页端反代 OpenAI API 的小鸡部署套件。R1.8.1，gw.sh 菜单式一键管理（主控/出口/代理池/体检），含健康巡检插件。
 
 ## 使用
 
