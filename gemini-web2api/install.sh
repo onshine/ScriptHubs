@@ -4,7 +4,7 @@
 # 支持：纯 IPv6 / 纯 IPv4 / 双栈 VPS（Debian / Ubuntu / CentOS，systemd）
 # 仓库：https://github.com/onshine/ScriptHubs/tree/main/gemini-web2api
 set -e
-SCRIPT_VERSION="R1.3.7"
+SCRIPT_VERSION="R1.3.8"
 VER="v4.0.0"
 REGEN=0
 PORT=8084
@@ -79,10 +79,18 @@ echo "[3/6] 下载二进制"
 # 运行中的可执行文件不能被直接覆盖（Text file busy），
 # 所以先停服务，再下到临时文件，最后 mv 原子替换。
 systemctl stop $SVC >/dev/null 2>&1 || true
+# 兜底：手工前台跑的实例不受 systemctl 管，仍会占用文件，一并停掉
+if [ -x "$DIR/gemini-web2api" ]; then
+  pkill -f "$DIR/gemini-web2api" >/dev/null 2>&1 || true
+  sleep 1
+fi
 URL="https://github.com/zexadev/gemini-web2api-go/releases/download/$VER/gemini-web2api-go_${VER}_linux_$A"
 if ! curl -fL --retry 3 -o gemini-web2api.new "$URL"; then
   rm -f gemini-web2api.new
   echo "❌ 下载失败：$URL"
+  if [ -n "$(pgrep -f "$DIR/gemini-web2api" 2>/dev/null)" ]; then
+    echo "   检测到仍有进程占用二进制，先执行： pkill -f $DIR/gemini-web2api"
+  fi
   echo "   1) 检查能否访问 GitHub:  curl -sI https://github.com | head -1"
   echo "   2) 纯 IPv6 机需先配 NAT64/WARP"
   echo "   3) 或本地下好后:  scp 文件 root@本机:$DIR/gemini-web2api"

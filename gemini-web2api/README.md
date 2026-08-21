@@ -42,6 +42,13 @@ curl -fL -o install.sh https://raw.githubusercontent.com/onshine/ScriptHubs/main
 chmod +x install.sh && sudo ./install.sh
 ```
 
+> **拉到的是旧版？** `raw.githubusercontent.com` 有约 5 分钟 CDN 缓存。
+> 脚本第一行会打印版本号，与本文档顶部的版本不一致就是拿到缓存了，
+> 用这个地址强制取最新：
+> ```bash
+> curl -fL -o install.sh "https://raw.githubusercontent.com/onshine/ScriptHubs/main/gemini-web2api/install.sh?$(date +%s)"
+> ```
+
 跑完打印 **Admin Token** 和 **API Key**，保存好。默认端口 8084，要改就 `sudo ./install.sh 9000`。
 
 > 重跑脚本是安全的：会自动停旧服务、复用已有凭据（客户端不用改配置）。
@@ -188,6 +195,7 @@ A：不会。上游只存元数据（模型、延迟、token 数、状态码）�
 
 | 版本 | 变更 |
 |---|---|
+| R1.3.8 | 下载前额外 `pkill` 掉不受 systemd 管的手工前台实例（它们同样会占用二进制导致 `Text file busy`）；失败时若检测到残留进程，直接给出 pkill 命令 |
 | R1.3.7 | 修复重跑时 `Text file busy`：运行中的可执行文件无法被 curl 直接覆盖。改为先 stop 服务、下载到 `.new` 临时文件、验证 `--version` 可执行后再 `mv` 原子替换（坏包不会顶掉可用版本）。下载失败的报错也不再一律归咎于 IPv6，改为列出 GitHub 连通性 / NAT64 / scp 三条排查方向 |
 | R1.3.6 | 修复 `source .credentials` 时文件里的 `PORT=` 会覆盖命令行指定端口的问题；补充 7 项本地逻辑测试（参数解析 / 凭据复用与重生 / 端口不被覆盖 / config.json 合法性 / 回退 sed）全部通过 |
 | R1.3.5 | 修复**凭据与运行进程不一致**：原先先写 systemd unit 再预检，预检失败 exit 时 unit 里已是新凭据但服务从未重启，运行中进程仍用旧 key，导致 `.credentials` 里的 key 报 `invalid_api_key`。改为预检通过后才写 unit；自检新增用 API Key 实测 `/v1/models` 鉴权是否真的通 |

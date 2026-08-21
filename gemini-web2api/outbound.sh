@@ -5,7 +5,7 @@
 #
 # 用 dante-server（Debian/Ubuntu 官方源自带，无 glibc 依赖坑）。
 set -e
-SCRIPT_VERSION="R1.3.7"
+SCRIPT_VERSION="R1.3.8"
 PORT=1080
 CFG=/etc/danted-gw.conf
 SVC=danted-gw
