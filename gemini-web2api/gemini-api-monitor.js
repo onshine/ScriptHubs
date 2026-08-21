@@ -1,5 +1,5 @@
 /*
- * gemini-web2api 多节点健康巡检 R1.0.0
+ * gemini-web2api 多节点健康巡检 R1.1.0
  * 支持 Loon / Quantumult X / Surge
  * 仓库：https://github.com/onshine/ScriptHubs/tree/main/gemini-web2api
  *
@@ -7,10 +7,10 @@
  *      检查存活/版本/模型数/Cookie 是否失效/Pro 是否可用/限流余量，
  *      异常时推送通知。多节点部署的运维刚需。
  *
- * 版本：R1.0.0（与 SCRIPT_VERSION 及 README 保持一致）
+ * 版本：R1.1.0（与 SCRIPT_VERSION 及 README 保持一致）
  */
 
-const SCRIPT_VERSION = "R1.0.0";
+const SCRIPT_VERSION = "R1.1.0";
 const NAME = "GeminiAPI巡检";
 
 // ── 配置：从插件 argument 读取 ────────────────────────────────
