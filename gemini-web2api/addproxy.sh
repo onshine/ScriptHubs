@@ -12,7 +12,7 @@
 #
 # 仓库：https://github.com/onshine/ScriptHubs/tree/main/gemini-web2api
 set -e
-SCRIPT_VERSION="R1.7.0"
+SCRIPT_VERSION="R1.8.0"
 RAWBASE="https://raw.githubusercontent.com/onshine/ScriptHubs/main/gemini-web2api"
 DIR="/opt/gemini-web2api"
 
@@ -173,7 +173,6 @@ EOF
   echo "[3/3] 加入代理池"
   URL="socks5h://$LU:$LP@127.0.0.1:$LPORT"
   NAME="本机出口"
-  echo "[3/3] 加入代理池"
 else
   # ── 加远程出口 ─────────────────────────────────────────────
   URL="$1"
@@ -189,57 +188,58 @@ else
   esac
   NAME="${2:-出口$(date +%H%M%S)}"
 
-  echo "测试代理连通性..."
+  # 只做最基本的可达性预检（能否建立 socks 连接）。
+  # 真正的判据在加入池子之后用上游 /admin/api/test 做真实生成请求——
+  # 「能打开 Gemini 首页」不等于「能完成 StreamGenerate」。
+  echo "预检 socks 连通性..."
   OUT=$(curl -s --max-time 15 --proxy "$URL" https://api64.ipify.org 2>/dev/null || echo "")
   if [ -z "$OUT" ]; then
-    echo "⚠️ 代理不可用（出口机未放行 / 账号密码错 / 服务未启动）"
+    echo "⚠️ 代理不可达（出口机服务未启动 / 账号密码错 / 端口未放行）"
     printf "仍然加入池子？[y/N] "
     read -r yn
     [ "$yn" = "y" ] || [ "$yn" = "Y" ] || { echo "已取消"; exit 1; }
   else
-    echo "   出口 IP：$OUT"
-    # 关键：还要能连通 Google，否则加进池子只会让请求整体失败
-    # （代理池非空时上游不回退直连，坏代理会直接拖垮服务）
-    GHDR=$(curl -s -i --max-time 20 --proxy "$URL" \
-           https://gemini.google.com/ 2>/dev/null | head -20 || echo "")
-    GCODE=$(printf '%s' "$GHDR" | sed -n 's|^HTTP/[0-9.]* \([0-9]*\).*|\1|p' | head -1)
-    [ -n "$GCODE" ] || GCODE=000
-    GLOC=$(printf '%s' "$GHDR" | sed -n 's/^[Ll]ocation: *//p' | head -1)
-    ask_confirm() {
-      printf "仍然加入池子？[y/N] "
-      read -r yn
-      [ "$yn" = "y" ] || [ "$yn" = "Y" ] || { echo "已取消"; exit 1; }
-    }
-    case "$GCODE" in
-      200) echo "✅ 可正常访问 Google (HTTP 200)" ;;
-      3*)
-        case "$GLOC" in
-          *sorry*|*captcha*)
-            echo "🚫 该出口 IP 已被 Google 风控（302 → /sorry/ 验证码页）" ;;
-          *)
-            echo "🚫 Google 返回 $GCODE 异常重定向 ${GLOC:+→ $GLOC}" ;;
-        esac
-        echo "   加进池子后轮到它的请求都会失败（上游不回退直连），"
-        echo "   客户端表现为「重试次数已用尽」。"
-        ask_confirm ;;
-      000)
-        echo "❌ 无法连通 gemini.google.com（该出口到 Google 不通）"
-        echo "   加进池子会导致请求失败——代理池非空时上游不回退直连。"
-        ask_confirm ;;
-      *)
-        echo "⚠️ Google 返回 HTTP $GCODE"
-        ask_confirm ;;
-    esac
+    echo "   出口 IP: $OUT"
   fi
 fi
 
 # ── 调 admin API 加入 ────────────────────────────────────────
 RESP=$(curl -s -X POST -H "$AUTH" -H "Content-Type: application/json" \
   -d "{\"name\":\"$NAME\",\"url\":\"$URL\",\"weight\":1}" "$API")
+NEWID=""
 case "$RESP" in
-  *'"id"'*) echo "✅ 已加入代理池：$NAME" ;;
+  *'"id"'*)
+    NEWID=$(printf '%s' "$RESP" | sed -n 's/.*"id" *: *\([0-9]*\).*/\1/p' | head -1)
+    echo "✅ 已加入代理池：$NAME (#$NEWID)" ;;
   *) echo "❌ 加入失败：$RESP"; exit 1 ;;
 esac
+
+# 用上游 /admin/api/test 做真实生成请求验证（与面板「连通性诊断」同源）
+if [ -n "$NEWID" ] && command -v python3 >/dev/null 2>&1; then
+  echo
+  echo "真实调用验证（Chrome146 指纹 + StreamGenerate，不消耗配额）..."
+  R=$(curl -s --max-time 90 -H "$AUTH" \
+      "http://127.0.0.1:$PORT/admin/api/test?proxy_id=$NEWID" 2>/dev/null \
+      | python3 -c '
+import json,sys
+try: d=json.load(sys.stdin)
+except Exception: print("parse_error|0||"); sys.exit()
+print("%s|%s|%s|%s" % (d.get("status","?"), d.get("total_ms",0),
+      (d.get("response_text") or "").replace("\n"," ")[:40],
+      (d.get("diagnostic") or "").replace("\n"," ")[:100]))
+' || echo "probe_failed|0||")
+  ST=$(printf '%s' "$R" | cut -d'|' -f1)
+  MS=$(printf '%s' "$R" | cut -d'|' -f2)
+  TX=$(printf '%s' "$R" | cut -d'|' -f3)
+  DG=$(printf '%s' "$R" | cut -d'|' -f4)
+  case "$ST" in
+    success)       echo "  ✅ 真实调用成功 (${MS}ms) 回复: $TX" ;;
+    blocked_sorry) echo "  🚫 该出口 IP 已被 Google 风控（302→/sorry/），建议禁用或换 IP" ;;
+    rate_limited)  echo "  ⏳ 该出口限流中，稍后会恢复" ;;
+    network_error) echo "  ❌ 网络不可达: $DG" ;;
+    *)             echo "  ⚠️ 状态=$ST  $DG" ;;
+  esac
+fi
 
 echo
 list_pool
