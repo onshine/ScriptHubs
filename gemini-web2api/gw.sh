@@ -14,11 +14,12 @@
 #   ./gw.sh status          状态总览
 #   ./gw.sh creds           查看 Token / API Key / 面板地址
 #   ./gw.sh rotate          轮换 API Key
+#   ./gw.sh openport        放行防火墙端口
 #   ./gw.sh uninstall       卸载主控
 #
 # 仓库：https://github.com/onshine/ScriptHubs/tree/main/gemini-web2api
 set -e
-SCRIPT_VERSION="R1.6.1"
+SCRIPT_VERSION="R1.7.0"
 RAWBASE="https://raw.githubusercontent.com/onshine/ScriptHubs/main/gemini-web2api"
 WORK=/usr/local/share/gemini-web2api
 DIR=/opt/gemini-web2api
@@ -27,6 +28,29 @@ DIR=/opt/gemini-web2api
 command -v curl >/dev/null 2>&1 || { apt-get update -qq && apt-get install -y -qq curl; }
 
 mkdir -p "$WORK"
+
+# 探测本机公网 IP。单一来源（如 ipify）可能被 CDN/劫持返回错误结果，
+# 故多源交叉验证：取出现次数最多的那个。
+pub_v4() {
+  for u in https://ipv4.icanhazip.com https://api.ipify.org \
+           https://ifconfig.me/ip https://checkip.amazonaws.com; do
+    r=$(curl -4 -s --max-time 6 "$u" 2>/dev/null | tr -d '[:space:]')
+    case "$r" in
+      [0-9]*.[0-9]*.[0-9]*.[0-9]*) echo "$r" ;;
+    esac
+  done | sort | uniq -c | sort -rn | awk 'NR==1{print $2}'
+}
+pub_v6() {
+  for u in https://ipv6.icanhazip.com https://api64.ipify.org https://ifconfig.co; do
+    r=$(curl -6 -s --max-time 6 "$u" 2>/dev/null | tr -d '[:space:]')
+    case "$r" in
+      *:*) echo "$r" ;;
+    esac
+  done | sort | uniq -c | sort -rn | awk 'NR==1{print $2}'
+}
+# 本机网卡上的地址（最可靠，不依赖外部服务）
+local_v4() { ip -4 addr show scope global 2>/dev/null | sed -n 's/.*inet \([0-9.]*\)\/.*/\1/p' | head -1; }
+local_v6() { ip -6 addr show scope global 2>/dev/null | sed -n 's/.*inet6 \([0-9a-fA-F:]*\)\/.*/\1/p' | grep -v '^fe80' | grep -v '^fd' | head -1; }
 
 # 拉取子脚本（带时间戳绕开 raw CDN 缓存），返回本地路径
 fetch() {
@@ -72,19 +96,45 @@ show_status() {
           | grep -o '"id"' | wc -l)
       echo "代理池      : $N 个"
       [ "$N" = "0" ] && echo "              （池空 = 走主控本机 IP 直连，正常）"
-      V4=$(curl -4 -s --max-time 5 https://api.ipify.org 2>/dev/null || echo "")
-      V6=$(curl -6 -s --max-time 5 https://api64.ipify.org 2>/dev/null || echo "")
+      LV4=$(local_v4); LV6=$(local_v6)
+      PV4=$(pub_v4);   PV6=$(pub_v6)
       echo "-------------------------------------------"
       echo "Admin Token : $ADMIN_TOKEN"
       echo "API Key     : $API_KEY"
       echo "-------------------------------------------"
-      if [ -n "$V4" ]; then
-        echo "管理面板    : http://$V4:$PORT/admin"
-        echo "API 地址    : http://$V4:$PORT/v1"
+      echo "网卡 IPv4   : ${LV4:-无}"
+      echo "网卡 IPv6   : ${LV6:-无}"
+      [ -n "$PV4" ] && [ "$PV4" != "$LV4" ] && \
+        echo "公网 IPv4   : $PV4  (与网卡不同 = NAT 或探测被劫持)"
+      echo "-------------------------------------------"
+      # 客户端该用哪个地址：优先网卡上的真实地址
+      UV4="${LV4:-$PV4}"; UV6="${LV6:-$PV6}"
+      if [ -n "$UV4" ]; then
+        echo "API 地址    : http://$UV4:$PORT/v1"
+        echo "管理面板    : http://$UV4:$PORT/admin"
       fi
-      if [ -n "$V6" ]; then
-        echo "面板(IPv6)  : http://[$V6]:$PORT/admin"
-        echo "API (IPv6)  : http://[$V6]:$PORT/v1"
+      if [ -n "$UV6" ]; then
+        echo "API (IPv6)  : http://[$UV6]:$PORT/v1"
+      fi
+      echo "-------------------------------------------"
+      # 外部可达性：从本机走公网地址回连自己，能通才说明客户端也能连
+      if [ -n "$UV4" ]; then
+        EC=$(curl -4 -s --max-time 8 -o /dev/null -w '%{http_code}' \
+             "http://$UV4:$PORT/" 2>/dev/null || echo 000)
+        case "$EC" in
+          200) echo "外部可达(v4): ✅ 通" ;;
+          000) echo "外部可达(v4): ❌ 不通 — 防火墙/安全组未放行 $PORT" ;;
+          *)   echo "外部可达(v4): ⚠️ HTTP $EC" ;;
+        esac
+      fi
+      if [ -n "$UV6" ]; then
+        EC6=$(curl -6 -s --max-time 8 -o /dev/null -w '%{http_code}' \
+              "http://[$UV6]:$PORT/" 2>/dev/null || echo 000)
+        case "$EC6" in
+          200) echo "外部可达(v6): ✅ 通" ;;
+          000) echo "外部可达(v6): ❌ 不通" ;;
+          *)   echo "外部可达(v6): ⚠️ HTTP $EC6" ;;
+        esac
       fi
     else
       echo "凭据文件    : ❌ 缺失"
@@ -115,8 +165,8 @@ show_creds() {
   fi
   . "$DIR/.credentials"
   [ -n "$PORT" ] || PORT=8084
-  V4=$(curl -4 -s --max-time 5 https://api.ipify.org 2>/dev/null || echo "")
-  V6=$(curl -6 -s --max-time 5 https://api64.ipify.org 2>/dev/null || echo "")
+  V4=$(local_v4); [ -n "$V4" ] || V4=$(pub_v4)
+  V6=$(local_v6); [ -n "$V6" ] || V6=$(pub_v6)
   echo "================= 凭据 ================="
   echo "Admin Token : $ADMIN_TOKEN"
   echo "API Key     : $API_KEY"
@@ -158,6 +208,45 @@ rotate_key() {
   fi
 }
 
+open_port() {
+  [ -f "$DIR/.credentials" ] || { echo "❌ 主控未安装"; return 1; }
+  . "$DIR/.credentials"; [ -n "$PORT" ] || PORT=8084
+  echo "放行端口 $PORT ..."
+  DONE=0
+  if command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -qi active; then
+    ufw allow "$PORT"/tcp >/dev/null 2>&1 && { echo "  ✅ ufw 已放行"; DONE=1; }
+  fi
+  if command -v firewall-cmd >/dev/null 2>&1 && firewall-cmd --state >/dev/null 2>&1; then
+    firewall-cmd --permanent --add-port="$PORT"/tcp >/dev/null 2>&1
+    firewall-cmd --reload >/dev/null 2>&1 && { echo "  ✅ firewalld 已放行"; DONE=1; }
+  fi
+  # iptables 直接插规则（很多小鸡是裸 iptables）
+  if command -v iptables >/dev/null 2>&1; then
+    iptables -C INPUT -p tcp --dport "$PORT" -j ACCEPT 2>/dev/null \
+      || iptables -I INPUT -p tcp --dport "$PORT" -j ACCEPT 2>/dev/null
+    echo "  ✅ iptables 已插入 ACCEPT 规则"
+    DONE=1
+  fi
+  if command -v ip6tables >/dev/null 2>&1; then
+    ip6tables -C INPUT -p tcp --dport "$PORT" -j ACCEPT 2>/dev/null \
+      || ip6tables -I INPUT -p tcp --dport "$PORT" -j ACCEPT 2>/dev/null
+    echo "  ✅ ip6tables 已插入 ACCEPT 规则"
+  fi
+  [ "$DONE" = "1" ] || echo "  ⚠️ 未检测到防火墙工具，可能本来就没拦"
+  echo
+  echo "⚠️ 若你的 VPS 商家有面板级安全组（Oracle/AWS/GCP/阿里云等），"
+  echo "   还需去商家控制台放行 TCP $PORT，系统内放行不够。"
+  echo
+  V4=$(local_v4); [ -n "$V4" ] || V4=$(pub_v4)
+  if [ -n "$V4" ]; then
+    C=$(curl -4 -s --max-time 8 -o /dev/null -w '%{http_code}' "http://$V4:$PORT/" 2>/dev/null || echo 000)
+    case "$C" in
+      200) echo "自测 http://$V4:$PORT/ → ✅ 可达" ;;
+      *)   echo "自测 http://$V4:$PORT/ → ❌ 仍不可达 (HTTP $C)，检查商家安全组" ;;
+    esac
+  fi
+}
+
 do_uninstall() {
   printf "确认卸载主控？数据库和凭据都会删除 [y/N] "
   read -r yn
@@ -194,10 +283,11 @@ case "$1" in
   status)    show_status;                 exit 0  ;;
   creds|token) show_creds;                exit $? ;;
   rotate)    rotate_key;                  exit $? ;;
+  openport|firewall) open_port;           exit $? ;;
   uninstall) do_uninstall;                exit 0  ;;
   ""|menu)   : ;;
   *) echo "未知命令: $1"
-     echo "可用: master outbound addproxy local check fix status creds rotate uninstall"; exit 1 ;;
+     echo "可用: master outbound addproxy local check fix status creds rotate openport uninstall"; exit 1 ;;
 esac
 
 # ── 交互菜单 ─────────────────────────────────────────────────
@@ -215,10 +305,11 @@ while :; do
   echo "  7) 状态总览（含 Token / API Key / 面板地址）"
   echo "  8) 查看凭据（Token / API Key）"
   echo "  9) 轮换 API Key"
-  echo " 10) 卸载"
+  echo " 10) 放行防火墙端口（客户端连不上时用）"
+  echo " 11) 卸载"
   echo "  0) 退出"
   echo
-  printf "选择 [0-10]: "
+  printf "选择 [0-11]: "
   read -r c
   echo
   case "$c" in
@@ -234,7 +325,8 @@ while :; do
     7) show_status ;;
     8) show_creds ;;
     9) rotate_key ;;
-    10) do_uninstall ;;
+    10) open_port ;;
+    11) do_uninstall ;;
     0) echo "再见"; exit 0 ;;
     *) echo "无效选择" ;;
   esac

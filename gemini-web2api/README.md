@@ -4,7 +4,7 @@
 一台做主控，其他小鸡做出口，配额叠加。
 
 - 上游项目：[zexadev/gemini-web2api-go](https://github.com/zexadev/gemini-web2api-go) v4.0.0
-- 本套件版本：**R1.6.1**
+- 本套件版本：**R1.7.0**
 
 ---
 
@@ -19,7 +19,7 @@ curl -fsSL https://raw.githubusercontent.com/onshine/ScriptHubs/main/gemini-web2
 
 ```
 ╔══════════════════════════════════════════╗
-║   gemini-web2api 管理面板  R1.6.1        ║
+║   gemini-web2api 管理面板  R1.7.0        ║
 ╚══════════════════════════════════════════╝
   1) 部署主控（提供 OpenAI 兼容 API）
   2) 把本机做成出口（装 socks5）
@@ -27,10 +27,11 @@ curl -fsSL https://raw.githubusercontent.com/onshine/ScriptHubs/main/gemini-web2
   4) 让主控自己也成为出口槽
   5) 代理池体检
   6) 一键修复（禁用被封的代理）
-  7) 状态总览（含 Token / API Key / 面板地址）
+  7) 状态总览（含凭据 / 地址 / 外部可达性）
   8) 查看凭据（Token / API Key）
   9) 轮换 API Key
- 10) 卸载
+ 10) 放行防火墙端口（客户端连不上时用）
+ 11) 卸载
   0) 退出
 ```
 
@@ -46,6 +47,7 @@ sudo ./gw.sh fix                       # 禁用被封的代理
 sudo ./gw.sh status                    # 状态总览
 sudo ./gw.sh creds                     # 查看 Token / API Key / 面板地址
 sudo ./gw.sh rotate                    # 轮换 API Key
+sudo ./gw.sh openport                  # 放行防火墙端口
 sudo ./gw.sh uninstall                 # 卸载
 ```
 
@@ -68,6 +70,37 @@ sudo ./gw.sh check         # 确认都健康
 ```
 
 ---
+
+## 本机 curl 能通，客户端连不上？
+
+99% 是**端口没对外放行**。先看诊断：
+
+```bash
+sudo ./gw.sh status
+```
+
+关注这两行：
+
+```
+外部可达(v4): ❌ 不通 — 防火墙/安全组未放行 8084
+API 地址    : http://<真实IP>:8084/v1
+```
+
+一键放行：
+
+```bash
+sudo ./gw.sh openport
+```
+
+它会同时处理 ufw / firewalld / iptables / ip6tables，然后自测可达性。
+
+> ⚠️ 若你用的是 Oracle Cloud、AWS、GCP、阿里云等带**面板级安全组**的商家，
+> 系统内放行不够，还要去商家控制台放行 TCP 8084。
+
+**另一个易错点：别把代理的出口 IP 当成主控地址。**
+`gw.sh status` 里的「API 地址」用的是网卡上的真实地址；
+如果你从代理体检结果里抄 IP（比如某个出口显示 `216.x.x.x`），那是**出口机的 IP**，
+不是主控的，填进客户端必然连不上。
 
 ## 忘了 Token / API Key？
 
@@ -231,7 +264,7 @@ A：不会。上游只存元数据（模型、延迟、token 数、状态码）�
 
 | 版本 | 变更 |
 |---|---|
-| R1.6.1 | `status` 补上 Admin Token / API Key / 面板与 API 地址（v4+v6）显示——此前只报服务状态，用户无从查看凭据。新增菜单项「查看凭据」与「轮换 API Key」及对应子命令 `creds` / `rotate`（轮换直接改 systemd `Environment=` 并重启+自测）。`install.sh` 结束时提示后续查看凭据的方式 |
+| R1.7.0 | `status` 补上 Admin Token / API Key / 面板与 API 地址（v4+v6）显示——此前只报服务状态，用户无从查看凭据。新增菜单项「查看凭据」与「轮换 API Key」及对应子命令 `creds` / `rotate`（轮换直接改 systemd `Environment=` 并重启+自测）。`install.sh` 结束时提示后续查看凭据的方式 |
 | R1.6.0 | **新增统一入口 `gw.sh`**。此前需要用户对四个子脚本分别手动 `curl` + `chmod`，极易因 raw CDN 缓存跑到旧版、或因粘贴时输出冲掉 `chmod` 而报 `command not found`。现在只需记一条命令，菜单选数字；每次运行自动带时间戳拉取最新子脚本并打印其版本号。附带 `status` 状态总览（服务/监听/健康/API Key/代理池数量一屏看完）与 `uninstall` 完整卸载 |
 | R1.5.0 | **出口改为默认优先 IPv4**。实测：Google 对机房 IPv6 段封锁远严于 IPv4，v6 出口普遍 302→`/sorry/` 或 `BardErrorInfo[1060]`（连上但拒绝生成）。另修 microsocks 致命行为：未设 `-b` 时 `addr_choose` 直接取 `getaddrinfo` 首项，glibc 双栈默认 v6 在前 → **无条件走 v6 且不回退 v4**，v6 不通即 `network unreachable`。现在部署时对 v4/v6 分别实测 Google 可达性，选可用的那个并显式 `-b` 绑定；`--force-v6` 可强制走 v6。四个脚本均内置 `RAWBASE`，报错时提示强制取新版命令 |
 | R1.4.2 | **修复 302 被误判为可用**。Google 对风控 IP 返回 302 → `/sorry/`（验证码页），原脚本把 3xx 都当"可连通"，导致被风控的代理留在池子里，请求轮到就失败 → 客户端报「重试次数已用尽」。现改为检查响应头 `Location`，命中 `sorry/captcha` 即判定 🚫 已风控并支持 `--disable` 自动禁用；`addproxy.sh` 加代理时同样拦截 |
