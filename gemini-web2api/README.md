@@ -206,6 +206,7 @@ A：不会。上游只存元数据（模型、延迟、token 数、状态码）�
 
 | 版本 | 变更 |
 |---|---|
+| R1.4.2 | **修复 302 被误判为可用**。Google 对风控 IP 返回 302 → `/sorry/`（验证码页），原脚本把 3xx 都当"可连通"，导致被风控的代理留在池子里，请求轮到就失败 → 客户端报「重试次数已用尽」。现改为检查响应头 `Location`，命中 `sorry/captcha` 即判定 🚫 已风控并支持 `--disable` 自动禁用；`addproxy.sh` 加代理时同样拦截 |
 | R1.4.1 | **修复强制绑定 IPv6 导致出口断网**：原先"有 v6 就绑"，但 microsocks 的 `-b` 会让它优先选与绑定地址同族的目标（`sockssrv.c` 的 `addr_choose`），若该 v6 到 Google 不通就彻底连不上。改为先实测 `curl -6 gemini.google.com` 可达才绑定，否则交由系统按 RFC 6724 自动选路（本来就优先 v6）；需强制绑定可加 `--force-v6`。`addproxy.sh` 加代理前除测出口 IP 外，**新增实测能否连通 gemini.google.com**，不通时明确警告（代理池非空时上游不回退直连，一个坏代理会拖垮整个服务）。**新增 `checkproxy.sh`** 批量体检代理池，`--disable` 自动禁用坏代理 |
 | R1.4.0 | **双引擎 + 强制 IPv6 出口**。部分系统源里没有 dante-server（报 `Unable to locate package`），新增 microsocks 源码编译回退（仅依赖 gcc，无 glibc 版本坑）。出口地址不再依赖系统默认路由：自动探测全局 IPv6 并显式绑定（dante 用 `external: <v6>`，microsocks 用 `-b <v6>`），确保「优先 IPv6 出口」。自检会明确报告实际走的是 v6 还是 v4；有 v6 的机器同时给出 v4 入口地址，方便无 v6 的主控连接 |
 | R1.3.8 | 下载前额外 `pkill` 掉不受 systemd 管的手工前台实例（它们同样会占用二进制导致 `Text file busy`）；失败时若检测到残留进程，直接给出 pkill 命令 |

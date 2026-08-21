@@ -8,7 +8,7 @@
 #
 # 仓库：https://github.com/onshine/ScriptHubs/tree/main/gemini-web2api
 set -e
-SCRIPT_VERSION="R1.4.1"
+SCRIPT_VERSION="R1.4.2"
 DIR="/opt/gemini-web2api"
 
 [ "$(id -u)" = "0" ] || { echo "请用 root 运行"; exit 1; }
@@ -53,23 +53,36 @@ while IFS="$(printf '\t')" read -r ID NAME URL EN; do
     [ "$DISABLE" = "1" ] && curl -s -X POST -H "$AUTH" "$API/$ID/toggle" >/dev/null 2>&1
     continue
   fi
-  # 2) Google 连通性
-  CODE=$(curl -s --max-time 20 --proxy "$URL" -o /dev/null -w '%{http_code}' \
-         https://gemini.google.com/ 2>/dev/null || echo 000)
+  # 2) Google 连通性 + 是否被风控
+  #    重点：302 通常是被重定向到 google.com/sorry/（验证码页），
+  #    即该出口 IP 已被 Google 拉黑，绝不能算"可用"。
+  HDR=$(curl -s -i --max-time 20 --proxy "$URL" \
+        https://gemini.google.com/ 2>/dev/null | head -20 || echo "")
+  CODE=$(printf '%s' "$HDR" | sed -n 's|^HTTP/[0-9.]* \([0-9]*\).*|\1|p' | head -1)
+  [ -n "$CODE" ] || CODE=000
+  LOC=$(printf '%s' "$HDR" | sed -n 's/^[Ll]ocation: *//p' | head -1)
+  case "$IP" in *:*) FAM=v6 ;; *) FAM=v4 ;; esac
   case "$CODE" in
-    2*|3*)
-      case "$IP" in
-        *:*) echo "✅ v6 出口 $IP  Google=$CODE" ;;
-        *)   echo "✅ v4 出口 $IP  Google=$CODE" ;;
-      esac
+    200)
+      echo "✅ $FAM 出口 $IP  Google=200"
       OK=$((OK+1)) ;;
+    3*)
+      case "$LOC" in
+        *sorry*|*captcha*)
+          echo "🚫 $FAM 出口 $IP  已被 Google 风控（302→/sorry/，需换 IP）" ;;
+        *)
+          echo "🚫 $FAM 出口 $IP  Google=$CODE 重定向异常 ${LOC:+→ $LOC}" ;;
+      esac
+      BAD=$((BAD+1))
+      [ "$DISABLE" = "1" ] && curl -s -X POST -H "$AUTH" "$API/$ID/toggle" >/dev/null 2>&1 ;;
     000)
-      echo "❌ 出口 $IP 能上网，但连不上 Google"
+      echo "❌ $FAM 出口 $IP 能上网，但连不上 Google"
       BAD=$((BAD+1))
       [ "$DISABLE" = "1" ] && curl -s -X POST -H "$AUTH" "$API/$ID/toggle" >/dev/null 2>&1 ;;
     *)
-      echo "⚠️ 出口 $IP  Google 返回 $CODE（可能被风控）"
-      BAD=$((BAD+1)) ;;
+      echo "⚠️ $FAM 出口 $IP  Google 返回 $CODE"
+      BAD=$((BAD+1))
+      [ "$DISABLE" = "1" ] && curl -s -X POST -H "$AUTH" "$API/$ID/toggle" >/dev/null 2>&1 ;;
   esac
 done < /tmp/gwproxies.txt
 rm -f /tmp/gwproxies.txt
@@ -83,7 +96,14 @@ fi
 if [ "$OK" = "0" ]; then
   echo
   echo "  ⚠️ 没有可用代理！代理池非空时上游不回退直连，"
-  echo "     服务会一直失败。请禁用全部坏代理或清空池子："
-  echo "     ./checkproxy.sh --disable"
+  echo "     服务会一直失败（表现为客户端「重试次数已用尽」）。"
+  echo "     先禁用全部坏代理: ./checkproxy.sh --disable"
+  echo "     全禁用后池子为空，服务会自动改用主控本机 IP 直连。"
+fi
+if [ "$BAD" -gt 0 ]; then
+  echo
+  echo "  说明: 🚫 = 该出口 IP 已被 Google 风控（302→/sorry/）。"
+  echo "        这是 IP 级封禁，等约 20 分钟~数小时可能恢复，"
+  echo "        或换一台机器/换 IP。放慢请求节奏无效。"
 fi
 echo "=============================================="

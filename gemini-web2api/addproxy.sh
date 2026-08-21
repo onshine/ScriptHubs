@@ -12,7 +12,7 @@
 #
 # 仓库：https://github.com/onshine/ScriptHubs/tree/main/gemini-web2api
 set -e
-SCRIPT_VERSION="R1.4.1"
+SCRIPT_VERSION="R1.4.2"
 DIR="/opt/gemini-web2api"
 
 [ "$(id -u)" = "0" ] || { echo "请用 root 运行"; exit 1; }
@@ -196,16 +196,35 @@ else
     echo "   出口 IP：$OUT"
     # 关键：还要能连通 Google，否则加进池子只会让请求整体失败
     # （代理池非空时上游不回退直连，坏代理会直接拖垮服务）
-    GCODE=$(curl -s --max-time 20 --proxy "$URL" -o /dev/null \
-            -w '%{http_code}' https://gemini.google.com/ 2>/dev/null || echo 000)
+    GHDR=$(curl -s -i --max-time 20 --proxy "$URL" \
+           https://gemini.google.com/ 2>/dev/null | head -20 || echo "")
+    GCODE=$(printf '%s' "$GHDR" | sed -n 's|^HTTP/[0-9.]* \([0-9]*\).*|\1|p' | head -1)
+    [ -n "$GCODE" ] || GCODE=000
+    GLOC=$(printf '%s' "$GHDR" | sed -n 's/^[Ll]ocation: *//p' | head -1)
+    ask_confirm() {
+      printf "仍然加入池子？[y/N] "
+      read -r yn
+      [ "$yn" = "y" ] || [ "$yn" = "Y" ] || { echo "已取消"; exit 1; }
+    }
     case "$GCODE" in
-      2*|3*) echo "✅ 可连通 Google (HTTP $GCODE)" ;;
-      000)   echo "❌ 无法连通 gemini.google.com（该出口到 Google 不通）"
-             echo "   加进池子会导致请求失败——代理池非空时上游不回退直连。"
-             printf "仍然加入？[y/N] "
-             read -r yn
-             [ "$yn" = "y" ] || [ "$yn" = "Y" ] || { echo "已取消"; exit 1; } ;;
-      *)     echo "⚠️ Google 返回 HTTP $GCODE（可能该 IP 已被风控）" ;;
+      200) echo "✅ 可正常访问 Google (HTTP 200)" ;;
+      3*)
+        case "$GLOC" in
+          *sorry*|*captcha*)
+            echo "🚫 该出口 IP 已被 Google 风控（302 → /sorry/ 验证码页）" ;;
+          *)
+            echo "🚫 Google 返回 $GCODE 异常重定向 ${GLOC:+→ $GLOC}" ;;
+        esac
+        echo "   加进池子后轮到它的请求都会失败（上游不回退直连），"
+        echo "   客户端表现为「重试次数已用尽」。"
+        ask_confirm ;;
+      000)
+        echo "❌ 无法连通 gemini.google.com（该出口到 Google 不通）"
+        echo "   加进池子会导致请求失败——代理池非空时上游不回退直连。"
+        ask_confirm ;;
+      *)
+        echo "⚠️ Google 返回 HTTP $GCODE"
+        ask_confirm ;;
     esac
   fi
 fi
