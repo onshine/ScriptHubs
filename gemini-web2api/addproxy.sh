@@ -12,7 +12,7 @@
 #
 # 仓库：https://github.com/onshine/ScriptHubs/tree/main/gemini-web2api
 set -e
-SCRIPT_VERSION="R1.3.5"
+SCRIPT_VERSION="R1.3.6"
 DIR="/opt/gemini-web2api"
 
 [ "$(id -u)" = "0" ] || { echo "请用 root 运行"; exit 1; }

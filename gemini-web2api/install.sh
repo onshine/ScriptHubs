@@ -4,7 +4,7 @@
 # 支持：纯 IPv6 / 纯 IPv4 / 双栈 VPS（Debian / Ubuntu / CentOS，systemd）
 # 仓库：https://github.com/onshine/ScriptHubs/tree/main/gemini-web2api
 set -e
-SCRIPT_VERSION="R1.3.5"
+SCRIPT_VERSION="R1.3.6"
 VER="v4.0.0"
 REGEN=0
 PORT=8084
@@ -51,7 +51,9 @@ gen() { tr -dc 'a-f0-9' < /dev/urandom | head -c "${1:-32}"; }
 REUSED=0
 if [ -f "$DIR/.credentials" ] && [ "$REGEN" != "1" ]; then
   # 复用已有凭据：重跑脚本不该让客户端配置全部失效
+  WANT_PORT="$PORT"          # 存好命令行指定的端口
   . "$DIR/.credentials"
+  PORT="$WANT_PORT"          # 别让文件里的 PORT= 覆盖它
   TOK="$ADMIN_TOKEN"; APIKEY="$API_KEY"
   [ -n "$TOK" ] && [ -n "$APIKEY" ] && REUSED=1
 fi

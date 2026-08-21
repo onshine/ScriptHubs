@@ -45,7 +45,8 @@ chmod +x install.sh && sudo ./install.sh
 跑完打印 **Admin Token** 和 **API Key**，保存好。默认端口 8084，要改就 `sudo ./install.sh 9000`。
 
 > 重跑脚本是安全的：会自动停旧服务、复用已有凭据（客户端不用改配置）。
-> 想强制换一套新凭据加 `--regen`。忘了凭据看 `cat /opt/gemini-web2api/.credentials`。
+> **想彻底重装换新凭据**：`sudo ./install.sh --regen`。
+> 忘了凭据看 `cat /opt/gemini-web2api/.credentials`。
 >
 > 凭据文件丢了也不怕，它们在 systemd 单元里，可这样恢复：
 > ```bash
@@ -187,6 +188,7 @@ A：不会。上游只存元数据（模型、延迟、token 数、状态码）�
 
 | 版本 | 变更 |
 |---|---|
+| R1.3.6 | 修复 `source .credentials` 时文件里的 `PORT=` 会覆盖命令行指定端口的问题；补充 7 项本地逻辑测试（参数解析 / 凭据复用与重生 / 端口不被覆盖 / config.json 合法性 / 回退 sed）全部通过 |
 | R1.3.5 | 修复**凭据与运行进程不一致**：原先先写 systemd unit 再预检，预检失败 exit 时 unit 里已是新凭据但服务从未重启，运行中进程仍用旧 key，导致 `.credentials` 里的 key 报 `invalid_api_key`。改为预检通过后才写 unit；自检新增用 API Key 实测 `/v1/models` 鉴权是否真的通 |
 | R1.3.4 | 凭据改为**生成后立刻落盘**（原先写在最后一步，中途自检失败就丢，用户拿不到 token）；`addproxy.sh` 在 `.credentials` 缺失时自动从 systemd 单元的 `Environment=` 行恢复 |
 | R1.3.3 | **重跑幂等**：① 预检前先 stop 旧服务并等端口释放，不再撞 `address already in use`；端口确实被别的进程占用时打印占用者 PID 并提示换端口 ② 凭据改为复用 `.credentials` 已有值，重跑不再让客户端配置全部失效；需要重新生成加 `--regen` |
