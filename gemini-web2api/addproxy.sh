@@ -12,12 +12,25 @@
 #
 # 仓库：https://github.com/onshine/ScriptHubs/tree/main/gemini-web2api
 set -e
-SCRIPT_VERSION="R1.3.3"
+SCRIPT_VERSION="R1.3.4"
 DIR="/opt/gemini-web2api"
 
 [ "$(id -u)" = "0" ] || { echo "请用 root 运行"; exit 1; }
-[ -f "$DIR/.credentials" ] || { echo "找不到 $DIR/.credentials，请先跑 install.sh"; exit 1; }
+# 凭据缺失时，尝试从 systemd 单元文件恢复（早期版本可能没落盘）
+if [ ! -f "$DIR/.credentials" ]; then
+  UNIT=/etc/systemd/system/gemini-web2api.service
+  if [ -f "$UNIT" ] && grep -q '^Environment=ADMIN_TOKEN=' "$UNIT"; then
+    echo "未找到 .credentials，从 systemd 单元恢复"
+    sed -n 's/^Environment=//p' "$UNIT" > "$DIR/.credentials"
+    grep -q '^PORT=' "$DIR/.credentials" || \
+      echo "PORT=$(sed -n 's/.*--port \([0-9]*\).*/\1/p' "$UNIT" | head -1)" >> "$DIR/.credentials"
+    chmod 600 "$DIR/.credentials"
+  else
+    echo "找不到 $DIR/.credentials，请先跑 install.sh"; exit 1
+  fi
+fi
 . "$DIR/.credentials"
+[ -n "$PORT" ] || PORT=8084
 API="http://127.0.0.1:$PORT/admin/api/proxies"
 AUTH="Authorization: Bearer $ADMIN_TOKEN"
 

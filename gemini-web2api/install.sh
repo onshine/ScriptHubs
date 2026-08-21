@@ -4,7 +4,7 @@
 # 支持：纯 IPv6 / 纯 IPv4 / 双栈 VPS（Debian / Ubuntu / CentOS，systemd）
 # 仓库：https://github.com/onshine/ScriptHubs/tree/main/gemini-web2api
 set -e
-SCRIPT_VERSION="R1.3.3"
+SCRIPT_VERSION="R1.3.4"
 VER="v4.0.0"
 REGEN=0
 PORT=8084
@@ -62,6 +62,14 @@ else
   APIKEY="sk-gemini-$(gen 40)"
   echo "[2/6] 凭据已生成"
 fi
+# 立刻落盘：后续步骤若失败，凭据也不会丢
+mkdir -p "$DIR"
+cat > "$DIR/.credentials" <<EOF
+ADMIN_TOKEN=$TOK
+API_KEY=$APIKEY
+PORT=$PORT
+EOF
+chmod 600 "$DIR/.credentials"
 
 # 3. 下载
 mkdir -p "$DIR/data" && cd "$DIR"
@@ -186,14 +194,6 @@ LISTEN=$(ss -tlnH "sport = :$PORT" 2>/dev/null | awk '{print $4}' | head -1)
 HEALTH=$(curl -s --max-time 5 "http://127.0.0.1:$PORT/" || echo FAIL)
 V4=$(curl -4 -s --max-time 6 https://api.ipify.org 2>/dev/null || echo "")
 V6=$(curl -6 -s --max-time 6 https://api64.ipify.org 2>/dev/null || echo "")
-
-# 存一份凭据给 addproxy.sh 免手输
-cat > "$DIR/.credentials" <<EOF
-ADMIN_TOKEN=$TOK
-API_KEY=$APIKEY
-PORT=$PORT
-EOF
-chmod 600 "$DIR/.credentials"
 
 # 面板地址按实际有的 IP 给
 if [ -n "$V4" ]; then PANEL="http://$V4:$PORT"; else PANEL="http://[$V6]:$PORT"; fi

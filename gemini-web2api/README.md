@@ -45,7 +45,12 @@ chmod +x install.sh && sudo ./install.sh
 跑完打印 **Admin Token** 和 **API Key**，保存好。默认端口 8084，要改就 `sudo ./install.sh 9000`。
 
 > 重跑脚本是安全的：会自动停旧服务、复用已有凭据（客户端不用改配置）。
-> 想强制换一套新凭据加 `--regen`。忘了凭据可以看 `cat /opt/gemini-web2api/.credentials`。
+> 想强制换一套新凭据加 `--regen`。忘了凭据看 `cat /opt/gemini-web2api/.credentials`。
+>
+> 凭据文件丢了也不怕，它们在 systemd 单元里，可这样恢复：
+> ```bash
+> sed -n 's/^Environment=//p' /etc/systemd/system/gemini-web2api.service
+> ```
 
 ### ③ 主控机加出口
 
@@ -182,6 +187,7 @@ A：不会。上游只存元数据（模型、延迟、token 数、状态码）�
 
 | 版本 | 变更 |
 |---|---|
+| R1.3.4 | 凭据改为**生成后立刻落盘**（原先写在最后一步，中途自检失败就丢，用户拿不到 token）；`addproxy.sh` 在 `.credentials` 缺失时自动从 systemd 单元的 `Environment=` 行恢复 |
 | R1.3.3 | **重跑幂等**：① 预检前先 stop 旧服务并等端口释放，不再撞 `address already in use`；端口确实被别的进程占用时打印占用者 PID 并提示换端口 ② 凭据改为复用 `.credentials` 已有值，重跑不再让客户端配置全部失效；需要重新生成加 `--regen` |
 | R1.3.2 | 修复主控启动失败 `too many colons in address`：上游用 `fmt.Sprintf("%s:%d", host, port)` 拼监听地址，`host` 填 `::` 会拼成非法的 `:::8084`，Go 要求 IPv6 通配符必须写 `[::]`。另新增：装服务前先前台预检启动 4 秒提前暴露配置错误、`[::]` 不被接受时自动回退 `0.0.0.0`、自检失败直接打印 journalctl 日志与手动排查命令（不再只提示"去看日志"） |
 | R1.3.1 | 三个脚本均加入**自愈逻辑**：启动时检测 dpkg 里处于"已解包未配置"（iU/iF）状态的残留 3proxy 并自动 purge + `apt --fix-broken install`。此前若跑过 R1.2.0，损坏的 3proxy 会卡住 apt 安装**任何**包，导致 R1.3.0 也装不上 dante；安装失败时给出明确自救命令 |
