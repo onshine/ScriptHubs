@@ -188,6 +188,7 @@ A：不会。上游只存元数据（模型、延迟、token 数、状态码）�
 
 | 版本 | 变更 |
 |---|---|
+| R1.3.7 | 修复重跑时 `Text file busy`：运行中的可执行文件无法被 curl 直接覆盖。改为先 stop 服务、下载到 `.new` 临时文件、验证 `--version` 可执行后再 `mv` 原子替换（坏包不会顶掉可用版本）。下载失败的报错也不再一律归咎于 IPv6，改为列出 GitHub 连通性 / NAT64 / scp 三条排查方向 |
 | R1.3.6 | 修复 `source .credentials` 时文件里的 `PORT=` 会覆盖命令行指定端口的问题；补充 7 项本地逻辑测试（参数解析 / 凭据复用与重生 / 端口不被覆盖 / config.json 合法性 / 回退 sed）全部通过 |
 | R1.3.5 | 修复**凭据与运行进程不一致**：原先先写 systemd unit 再预检，预检失败 exit 时 unit 里已是新凭据但服务从未重启，运行中进程仍用旧 key，导致 `.credentials` 里的 key 报 `invalid_api_key`。改为预检通过后才写 unit；自检新增用 API Key 实测 `/v1/models` 鉴权是否真的通 |
 | R1.3.4 | 凭据改为**生成后立刻落盘**（原先写在最后一步，中途自检失败就丢，用户拿不到 token）；`addproxy.sh` 在 `.credentials` 缺失时自动从 systemd 单元的 `Environment=` 行恢复 |

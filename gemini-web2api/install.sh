@@ -4,7 +4,7 @@
 # 支持：纯 IPv6 / 纯 IPv4 / 双栈 VPS（Debian / Ubuntu / CentOS，systemd）
 # 仓库：https://github.com/onshine/ScriptHubs/tree/main/gemini-web2api
 set -e
-SCRIPT_VERSION="R1.3.6"
+SCRIPT_VERSION="R1.3.7"
 VER="v4.0.0"
 REGEN=0
 PORT=8084
@@ -76,11 +76,27 @@ chmod 600 "$DIR/.credentials"
 # 3. 下载
 mkdir -p "$DIR/data" && cd "$DIR"
 echo "[3/6] 下载二进制"
-curl -fL --retry 3 -o gemini-web2api \
-  "https://github.com/zexadev/gemini-web2api-go/releases/download/$VER/gemini-web2api-go_${VER}_linux_$A" \
-  || { echo "下载失败。纯 IPv6 机需先配 NAT64/WARP，或本地下好 scp 到 $DIR"; exit 1; }
-chmod +x gemini-web2api
-./gemini-web2api --version >/dev/null || { echo "二进制不可执行"; exit 1; }
+# 运行中的可执行文件不能被直接覆盖（Text file busy），
+# 所以先停服务，再下到临时文件，最后 mv 原子替换。
+systemctl stop $SVC >/dev/null 2>&1 || true
+URL="https://github.com/zexadev/gemini-web2api-go/releases/download/$VER/gemini-web2api-go_${VER}_linux_$A"
+if ! curl -fL --retry 3 -o gemini-web2api.new "$URL"; then
+  rm -f gemini-web2api.new
+  echo "❌ 下载失败：$URL"
+  echo "   1) 检查能否访问 GitHub:  curl -sI https://github.com | head -1"
+  echo "   2) 纯 IPv6 机需先配 NAT64/WARP"
+  echo "   3) 或本地下好后:  scp 文件 root@本机:$DIR/gemini-web2api"
+  exit 1
+fi
+chmod +x gemini-web2api.new
+# 先验证新文件能跑，再替换旧的（坏包不会顶掉可用的版本）
+if ! ./gemini-web2api.new --version >/dev/null 2>&1; then
+  rm -f gemini-web2api.new
+  echo "❌ 下载的二进制无法执行（可能是架构不符或文件损坏）"
+  exit 1
+fi
+mv -f gemini-web2api.new gemini-web2api
+echo "      $(./gemini-web2api --version 2>/dev/null || echo '版本未知')"
 
 # 4. config.json —— host 必须 :: 才能同时监听 v4+v6
 #    上游默认 0.0.0.0 是 IPv4 通配符，且没有 --host 参数，纯 v6 机外部连不上。
