@@ -4,9 +4,16 @@
 # 支持：纯 IPv6 / 纯 IPv4 / 双栈 VPS（Debian / Ubuntu / CentOS，systemd）
 # 仓库：https://github.com/onshine/ScriptHubs/tree/main/gemini-web2api
 set -e
-SCRIPT_VERSION="R1.3.2"
+SCRIPT_VERSION="R1.3.3"
 VER="v4.0.0"
-PORT="${1:-8084}"
+REGEN=0
+PORT=8084
+for a in "$@"; do
+  case "$a" in
+    --regen) REGEN=1 ;;
+    [0-9]*)  PORT="$a" ;;
+  esac
+done
 DIR="/opt/gemini-web2api"
 SVC="gemini-web2api"
 
@@ -41,9 +48,20 @@ echo "[1/6] 架构 linux_$A"
 
 # 2. 凭据（内核 CSPRNG，不落 history、不进命令行）
 gen() { tr -dc 'a-f0-9' < /dev/urandom | head -c "${1:-32}"; }
-TOK=$(gen 32)
-APIKEY="sk-gemini-$(gen 40)"
-echo "[2/6] 凭据已生成"
+REUSED=0
+if [ -f "$DIR/.credentials" ] && [ "$REGEN" != "1" ]; then
+  # 复用已有凭据：重跑脚本不该让客户端配置全部失效
+  . "$DIR/.credentials"
+  TOK="$ADMIN_TOKEN"; APIKEY="$API_KEY"
+  [ -n "$TOK" ] && [ -n "$APIKEY" ] && REUSED=1
+fi
+if [ "$REUSED" = "1" ]; then
+  echo "[2/6] 复用已有凭据（要重新生成请加 --regen）"
+else
+  TOK=$(gen 32)
+  APIKEY="sk-gemini-$(gen 40)"
+  echo "[2/6] 凭据已生成"
+fi
 
 # 3. 下载
 mkdir -p "$DIR/data" && cd "$DIR"
@@ -109,7 +127,27 @@ EOF
 chmod 600 /etc/systemd/system/$SVC.service
 systemctl daemon-reload
 
-# 先前台试跑 3 秒，能提前暴露配置类错误（比如监听地址写法不对）
+# 重跑时先停旧服务，否则预检必然撞 "address already in use"
+if systemctl list-unit-files "$SVC.service" >/dev/null 2>&1; then
+  systemctl stop $SVC >/dev/null 2>&1 || true
+fi
+# 等端口释放（最多 6 秒）
+i=0
+while [ $i -lt 12 ]; do
+  ss -tlnH "sport = :$PORT" 2>/dev/null | grep -q . || break
+  sleep 0.5; i=$((i+1))
+done
+# 仍被占用 = 别的进程占了，直接报清楚是谁
+if ss -tlnH "sport = :$PORT" 2>/dev/null | grep -q .; then
+  echo "❌ 端口 $PORT 已被占用，占用者："
+  ss -tlnpH "sport = :$PORT" 2>/dev/null | sed 's/^/     /'
+  echo
+  echo "   换端口重跑:  sudo ./install.sh 9000"
+  echo "   或先停掉占用它的进程"
+  exit 1
+fi
+
+# 先前台试跑 4 秒，能提前暴露配置类错误（比如监听地址写法不对）
 echo "      预检启动..."
 PRE=$(cd "$DIR" && timeout 4 sudo -u gemini env ADMIN_TOKEN="$TOK" API_KEY="$APIKEY" \
       "$DIR/gemini-web2api" --config "$DIR/config.json" --port "$PORT" \
