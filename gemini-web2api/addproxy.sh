@@ -12,7 +12,8 @@
 #
 # 仓库：https://github.com/onshine/ScriptHubs/tree/main/gemini-web2api
 set -e
-SCRIPT_VERSION="R1.4.2"
+SCRIPT_VERSION="R1.5.0"
+RAWBASE="https://raw.githubusercontent.com/onshine/ScriptHubs/main/gemini-web2api"
 DIR="/opt/gemini-web2api"
 
 [ "$(id -u)" = "0" ] || { echo "请用 root 运行"; exit 1; }
@@ -87,7 +88,10 @@ fi
       else
         yum install -y gcc make >/dev/null 2>&1
       fi
-      command -v gcc >/dev/null 2>&1 || { echo "❌ 装不上 gcc"; exit 1; }
+      command -v gcc >/dev/null 2>&1 || {
+        echo "❌ 装不上 gcc。请先确认本脚本是最新版："
+        echo "   curl -fL -o addproxy.sh \"$RAWBASE/addproxy.sh?\$(date +%s)\""
+        exit 1; }
       MTAG=$(curl -fsSL https://api.github.com/repos/rofl0r/microsocks/releases/latest 2>/dev/null \
              | sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p' | head -1)
       [ -n "$MTAG" ] || MTAG=v1.0.5

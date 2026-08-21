@@ -5,7 +5,8 @@
 #
 # 用 dante-server（Debian/Ubuntu 官方源自带，无 glibc 依赖坑）。
 set -e
-SCRIPT_VERSION="R1.4.2"
+SCRIPT_VERSION="R1.5.0"
+RAWBASE="https://raw.githubusercontent.com/onshine/ScriptHubs/main/gemini-web2api"
 PORT=1080
 CFG=/etc/danted-gw.conf
 SVC=danted-gw
@@ -88,22 +89,53 @@ IFACE=$(ip -o -6 route show default 2>/dev/null | awk '{print $5}' | head -1)
 [ -n "$IFACE" ] || IFACE=$(ip -o -4 route show default 2>/dev/null | awk '{print $5}' | head -1)
 [ -n "$IFACE" ] || IFACE=$(ip -o link show 2>/dev/null | awk -F': ' '$2!="lo"{print $2; exit}')
 [ -n "$IFACE" ] || { echo "❌ 找不到网卡"; exit 1; }
-# 探测全局 IPv6，并实测它能否真正连通 Google。
-# 关键：不能"有 v6 就强制绑定"——若该 v6 到 Google 不通，绑死会直接断网。
+# 探测出口地址族并实测 Google 可达性。
+# 实测结论：Google 对机房 IPv6 段封锁远严于 IPv4——v6 常见 302→/sorry/
+# 或 BardErrorInfo[1060]（连上但拒绝生成）。所以默认优先 IPv4 出口。
+# 另注意 microsocks 未设 -b 时 addr_choose 直接取 getaddrinfo 首项，
+# glibc 双栈默认 v6 在前，会无条件走 v6 且不回退 v4 → network unreachable。
 BINDV6=$(ip -6 addr show scope global 2>/dev/null \
          | sed -n 's/.*inet6 \([0-9a-fA-F:]*\)\/.*/\1/p' \
          | grep -v '^fe80' | grep -v '^fd' | head -1)
-V6OK=0
+BINDV4=$(ip -4 addr show scope global 2>/dev/null \
+         | sed -n 's/.*inet \([0-9.]*\)\/.*/\1/p' | head -1)
+
+probe() {  # $1=-4|-6 → 打印 HTTP 状态码，被风控则打印 SORRY
+  _h=$(curl "$1" -s -i --max-time 10 https://gemini.google.com/ 2>/dev/null | head -12 || echo "")
+  _c=$(printf '%s' "$_h" | sed -n 's|^HTTP/[0-9.]* \([0-9]*\).*|\1|p' | head -1)
+  _l=$(printf '%s' "$_h" | sed -n 's/^[Ll]ocation: *//p' | head -1)
+  case "$_l" in *sorry*|*captcha*) echo SORRY; return;; esac
+  echo "${_c:-000}"
+}
+
+V4OK=0; V6OK=0
+if [ -n "$BINDV4" ]; then
+  R4=$(probe -4); [ "$R4" = "200" ] && V4OK=1
+  echo "      IPv4 $BINDV4 → Google: $R4"
+fi
 if [ -n "$BINDV6" ]; then
-  if curl -6 -s --max-time 8 -o /dev/null -w '%{http_code}' \
-       https://gemini.google.com/ 2>/dev/null | grep -qE '^[23]'; then
-    V6OK=1
-    echo "      网卡 $IFACE，IPv6 $BINDV6 → Google 可达 ✅"
-  else
-    echo "      网卡 $IFACE，⚠️ 有 IPv6 但连不上 Google，将交由系统自动选路"
-  fi
+  R6=$(probe -6); [ "$R6" = "200" ] && V6OK=1
+  echo "      IPv6 $BINDV6 → Google: $R6"
+fi
+
+# 选出口：默认优先可用的 IPv4；--force-v6 才在 v6 可用时强制走 v6
+BINDADDR=""; FAMILY=""
+if [ "$FORCE_V6" = "1" ] && [ "$V6OK" = "1" ]; then
+  BINDADDR="$BINDV6"; FAMILY=IPv6
+elif [ "$V4OK" = "1" ]; then
+  BINDADDR="$BINDV4"; FAMILY=IPv4
+elif [ "$V6OK" = "1" ]; then
+  BINDADDR="$BINDV6"; FAMILY=IPv6
+fi
+
+if [ -n "$BINDADDR" ]; then
+  echo "      ✅ 选定出口: $FAMILY $BINDADDR"
 else
-  echo "      网卡 $IFACE，无全局 IPv6，走 IPv4 出口"
+  echo "      ⚠️ 两个地址族都无法正常访问 Google（可能该机 IP 已被风控）"
+  echo "         仍会部署，但加进主控代理池后请求会失败。"
+  # 有 v4 就默认绑 v4，避免 microsocks 无条件走不通的 v6
+  BINDADDR="${BINDV4:-$BINDV6}"
+  [ -n "$BINDV4" ] && FAMILY=IPv4 || FAMILY=IPv6
 fi
 
 # ── 3. 账号密码（随机，防止变成公共代理）──────────────────────
@@ -120,8 +152,7 @@ if [ "$ENGINE" = "dante" ]; then
   id "$USER" >/dev/null 2>&1 || useradd -r -M -s /usr/sbin/nologin "$USER"
   echo "$USER:$PASS" | chpasswd
   # external 指定 v6 地址 → 出站强制从该 v6 发起；无 v6 时退回网卡名
-  # v6 实测可达才显式指定；否则给网卡名，让 dante 按目标地址族自动选源
-  if [ "$V6OK" = "1" ]; then EXT="$BINDV6"; else EXT="$IFACE"; fi
+  EXT="${BINDADDR:-$IFACE}"
   cat > "$CFG" <<EOF
 # gemini-web2api 出口 $SCRIPT_VERSION
 logoutput: syslog
@@ -155,10 +186,10 @@ EOF
 else
   # microsocks：-b 绑定出口地址，-i 监听地址
   BIN=$(command -v microsocks)
-  # 注意：microsocks 的 -b 会让它优先选与绑定地址同族的目标地址
-  # （sockssrv.c addr_choose），v6 不通时会彻底连不上。故仅在实测可达时绑定。
-  if [ "$V6OK" = "1" ] && [ "$FORCE_V6" = "1" ]; then
-    EXECLINE="$BIN -i :: -p $PORT -u $USER -P $PASS -b $BINDV6"
+  # 必须显式 -b：未绑定时 addr_choose 取 getaddrinfo 首项（glibc 双栈 v6 优先），
+  # 会无条件走 v6 且不回退 v4，v6 不通即 network unreachable。
+  if [ -n "$BINDADDR" ]; then
+    EXECLINE="$BIN -i :: -p $PORT -u $USER -P $PASS -b $BINDADDR"
   else
     EXECLINE="$BIN -i :: -p $PORT -u $USER -P $PASS"
   fi
@@ -217,18 +248,18 @@ else
   echo "     排查: journalctl -u $SVC -n 30"
 fi
 echo "  引擎        : $ENGINE"
+echo "  选定出口    : ${FAMILY:-自动} ${BINDADDR:-}"
 echo "  本机 IPv6   : ${V6:-无}"
 echo "  本机 IPv4   : ${V4:-无}"
 echo "--------------------------------------------------------------"
 echo "  复制下面这一整行，拿到主控机用："
 echo
-# 给主控连的地址：优先 v6（主控若无 v6 则用 v4）
-if [ -n "$V6" ]; then
-  echo "  socks5h://$USER:$PASS@[$V6]:$PORT"
-  [ -n "$V4" ] && { echo; echo "  主控没有 IPv6 就用这个（v4 入口、v6 出口）："; \
-                    echo "  socks5h://$USER:$PASS@$V4:$PORT"; }
-else
+if [ -n "$V4" ]; then
   echo "  socks5h://$USER:$PASS@$V4:$PORT"
+  [ -n "$V6" ] && { echo; echo "  主控走 IPv6 连本机可用这个（入口 v6，出口仍是上面选定的）："; \
+                    echo "  socks5h://$USER:$PASS@[$V6]:$PORT"; }
+else
+  echo "  socks5h://$USER:$PASS@[$V6]:$PORT"
 fi
 echo
 echo "  ⚠️ 密码只显示这一次，请立刻复制保存"
