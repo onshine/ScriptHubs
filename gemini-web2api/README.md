@@ -4,7 +4,7 @@
 一台做主控，其他小鸡做出口，配额叠加。
 
 - 上游项目：[zexadev/gemini-web2api-go](https://github.com/zexadev/gemini-web2api-go) v4.0.0
-- 本套件版本：**R1.6.0**
+- 本套件版本：**R1.6.1**
 
 ---
 
@@ -19,7 +19,7 @@ curl -fsSL https://raw.githubusercontent.com/onshine/ScriptHubs/main/gemini-web2
 
 ```
 ╔══════════════════════════════════════════╗
-║   gemini-web2api 管理面板  R1.6.0        ║
+║   gemini-web2api 管理面板  R1.6.1        ║
 ╚══════════════════════════════════════════╝
   1) 部署主控（提供 OpenAI 兼容 API）
   2) 把本机做成出口（装 socks5）
@@ -27,8 +27,10 @@ curl -fsSL https://raw.githubusercontent.com/onshine/ScriptHubs/main/gemini-web2
   4) 让主控自己也成为出口槽
   5) 代理池体检
   6) 一键修复（禁用被封的代理）
-  7) 状态总览
-  8) 卸载
+  7) 状态总览（含 Token / API Key / 面板地址）
+  8) 查看凭据（Token / API Key）
+  9) 轮换 API Key
+ 10) 卸载
   0) 退出
 ```
 
@@ -42,6 +44,8 @@ sudo ./gw.sh local                     # 主控自己也当出口槽
 sudo ./gw.sh check                     # 代理池体检
 sudo ./gw.sh fix                       # 禁用被封的代理
 sudo ./gw.sh status                    # 状态总览
+sudo ./gw.sh creds                     # 查看 Token / API Key / 面板地址
+sudo ./gw.sh rotate                    # 轮换 API Key
 sudo ./gw.sh uninstall                 # 卸载
 ```
 
@@ -64,6 +68,27 @@ sudo ./gw.sh check         # 确认都健康
 ```
 
 ---
+
+## 忘了 Token / API Key？
+
+```bash
+sudo ./gw.sh creds
+```
+
+一屏给出 Admin Token、API Key、面板地址、API 地址（v4 与 v6 都列）。
+凭据存在 `/opt/gemini-web2api/.credentials`（权限 600），也可直接 `cat` 查看。
+
+万一该文件丢了，脚本会自动从 systemd 单元的 `Environment=` 行恢复。手动版：
+
+```bash
+sed -n 's/^Environment=//p' /etc/systemd/system/gemini-web2api.service
+```
+
+想换一把新 API Key（比如误贴到公开场合）：
+
+```bash
+sudo ./gw.sh rotate
+```
 
 ## ⚠️ 两个坑（这套脚本已经帮你处理）
 
@@ -206,6 +231,7 @@ A：不会。上游只存元数据（模型、延迟、token 数、状态码）�
 
 | 版本 | 变更 |
 |---|---|
+| R1.6.1 | `status` 补上 Admin Token / API Key / 面板与 API 地址（v4+v6）显示——此前只报服务状态，用户无从查看凭据。新增菜单项「查看凭据」与「轮换 API Key」及对应子命令 `creds` / `rotate`（轮换直接改 systemd `Environment=` 并重启+自测）。`install.sh` 结束时提示后续查看凭据的方式 |
 | R1.6.0 | **新增统一入口 `gw.sh`**。此前需要用户对四个子脚本分别手动 `curl` + `chmod`，极易因 raw CDN 缓存跑到旧版、或因粘贴时输出冲掉 `chmod` 而报 `command not found`。现在只需记一条命令，菜单选数字；每次运行自动带时间戳拉取最新子脚本并打印其版本号。附带 `status` 状态总览（服务/监听/健康/API Key/代理池数量一屏看完）与 `uninstall` 完整卸载 |
 | R1.5.0 | **出口改为默认优先 IPv4**。实测：Google 对机房 IPv6 段封锁远严于 IPv4，v6 出口普遍 302→`/sorry/` 或 `BardErrorInfo[1060]`（连上但拒绝生成）。另修 microsocks 致命行为：未设 `-b` 时 `addr_choose` 直接取 `getaddrinfo` 首项，glibc 双栈默认 v6 在前 → **无条件走 v6 且不回退 v4**，v6 不通即 `network unreachable`。现在部署时对 v4/v6 分别实测 Google 可达性，选可用的那个并显式 `-b` 绑定；`--force-v6` 可强制走 v6。四个脚本均内置 `RAWBASE`，报错时提示强制取新版命令 |
 | R1.4.2 | **修复 302 被误判为可用**。Google 对风控 IP 返回 302 → `/sorry/`（验证码页），原脚本把 3xx 都当"可连通"，导致被风控的代理留在池子里，请求轮到就失败 → 客户端报「重试次数已用尽」。现改为检查响应头 `Location`，命中 `sorry/captcha` 即判定 🚫 已风控并支持 `--disable` 自动禁用；`addproxy.sh` 加代理时同样拦截 |

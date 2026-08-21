@@ -12,7 +12,7 @@
 #
 # 仓库：https://github.com/onshine/ScriptHubs/tree/main/gemini-web2api
 set -e
-SCRIPT_VERSION="R1.6.0"
+SCRIPT_VERSION="R1.6.1"
 RAWBASE="https://raw.githubusercontent.com/onshine/ScriptHubs/main/gemini-web2api"
 DIR="/opt/gemini-web2api"
 

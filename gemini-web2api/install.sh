@@ -4,7 +4,7 @@
 # 支持：纯 IPv6 / 纯 IPv4 / 双栈 VPS（Debian / Ubuntu / CentOS，systemd）
 # 仓库：https://github.com/onshine/ScriptHubs/tree/main/gemini-web2api
 set -e
-SCRIPT_VERSION="R1.6.0"
+SCRIPT_VERSION="R1.6.1"
 RAWBASE="https://raw.githubusercontent.com/onshine/ScriptHubs/main/gemini-web2api"
 VER="v4.0.0"
 REGEN=0
@@ -244,7 +244,8 @@ echo "  本机 IPv6   : ${V6:-无}"
 echo "--------------------------------------------------------------"
 echo "  Admin Token : $TOK"
 echo "  API Key     : $APIKEY"
-echo "  （已存 $DIR/.credentials，addproxy.sh 会自动读取）"
+echo "  （已存 $DIR/.credentials）"
+echo "  以后随时查看: ./gw.sh creds    或   cat $DIR/.credentials"
 echo "--------------------------------------------------------------"
 echo "  管理面板    : $PANEL/admin"
 echo "  API 地址    : $PANEL/v1"

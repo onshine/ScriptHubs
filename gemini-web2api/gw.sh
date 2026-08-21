@@ -12,11 +12,13 @@
 #   ./gw.sh check           代理池体检
 #   ./gw.sh fix             一键修复（禁用坏代理）
 #   ./gw.sh status          状态总览
+#   ./gw.sh creds           查看 Token / API Key / 面板地址
+#   ./gw.sh rotate          轮换 API Key
 #   ./gw.sh uninstall       卸载主控
 #
 # 仓库：https://github.com/onshine/ScriptHubs/tree/main/gemini-web2api
 set -e
-SCRIPT_VERSION="R1.6.0"
+SCRIPT_VERSION="R1.6.1"
 RAWBASE="https://raw.githubusercontent.com/onshine/ScriptHubs/main/gemini-web2api"
 WORK=/usr/local/share/gemini-web2api
 DIR=/opt/gemini-web2api
@@ -70,8 +72,20 @@ show_status() {
           | grep -o '"id"' | wc -l)
       echo "代理池      : $N 个"
       [ "$N" = "0" ] && echo "              （池空 = 走主控本机 IP 直连，正常）"
-      V4=$(curl -4 -s --max-time 5 https://api.ipify.org 2>/dev/null || echo 无)
-      echo "面板        : http://$V4:$PORT/admin"
+      V4=$(curl -4 -s --max-time 5 https://api.ipify.org 2>/dev/null || echo "")
+      V6=$(curl -6 -s --max-time 5 https://api64.ipify.org 2>/dev/null || echo "")
+      echo "-------------------------------------------"
+      echo "Admin Token : $ADMIN_TOKEN"
+      echo "API Key     : $API_KEY"
+      echo "-------------------------------------------"
+      if [ -n "$V4" ]; then
+        echo "管理面板    : http://$V4:$PORT/admin"
+        echo "API 地址    : http://$V4:$PORT/v1"
+      fi
+      if [ -n "$V6" ]; then
+        echo "面板(IPv6)  : http://[$V6]:$PORT/admin"
+        echo "API (IPv6)  : http://[$V6]:$PORT/v1"
+      fi
     else
       echo "凭据文件    : ❌ 缺失"
     fi
@@ -84,6 +98,64 @@ show_status() {
     fi
   done
   echo "==========================================="
+}
+
+show_creds() {
+  if [ ! -f "$DIR/.credentials" ]; then
+    # 凭据文件丢了就从 systemd 单元恢复
+    U=/etc/systemd/system/gemini-web2api.service
+    if [ -f "$U" ] && grep -q '^Environment=ADMIN_TOKEN=' "$U"; then
+      echo "（.credentials 缺失，从 systemd 单元恢复）"
+      sed -n 's/^Environment=//p' "$U" > "$DIR/.credentials"
+      echo "PORT=$(sed -n 's/.*--port \([0-9]*\).*/\1/p' "$U" | head -1)" >> "$DIR/.credentials"
+      chmod 600 "$DIR/.credentials"
+    else
+      echo "❌ 找不到凭据，主控可能未安装"; return 1
+    fi
+  fi
+  . "$DIR/.credentials"
+  [ -n "$PORT" ] || PORT=8084
+  V4=$(curl -4 -s --max-time 5 https://api.ipify.org 2>/dev/null || echo "")
+  V6=$(curl -6 -s --max-time 5 https://api64.ipify.org 2>/dev/null || echo "")
+  echo "================= 凭据 ================="
+  echo "Admin Token : $ADMIN_TOKEN"
+  echo "API Key     : $API_KEY"
+  echo "端口        : $PORT"
+  echo "----------------------------------------"
+  [ -n "$V4" ] && { echo "面板 : http://$V4:$PORT/admin"; echo "API  : http://$V4:$PORT/v1"; }
+  [ -n "$V6" ] && { echo "面板 : http://[$V6]:$PORT/admin"; echo "API  : http://[$V6]:$PORT/v1"; }
+  echo "----------------------------------------"
+  echo "客户端填法: Base URL 用上面 API 地址，API Key 用上面那个"
+  echo "文件位置  : $DIR/.credentials"
+  echo "========================================"
+}
+
+rotate_key() {
+  [ -f "$DIR/.credentials" ] || { echo "❌ 主控未安装"; return 1; }
+  . "$DIR/.credentials"
+  [ -n "$PORT" ] || PORT=8084
+  echo "⚠️ 轮换后所有客户端都要改配置。"
+  printf "确认轮换 API Key？[y/N] "
+  read -r yn
+  [ "$yn" = "y" ] || [ "$yn" = "Y" ] || { echo "已取消"; return 0; }
+  NEW="sk-gemini-$(tr -dc 'a-f0-9' < /dev/urandom | head -c 40)"
+  # API_KEY 由环境变量锁定，需改 systemd 单元后重启
+  U=/etc/systemd/system/gemini-web2api.service
+  sed -i "s|^Environment=API_KEY=.*|Environment=API_KEY=$NEW|" "$U"
+  sed -i "s|^API_KEY=.*|API_KEY=$NEW|" "$DIR/.credentials"
+  systemctl daemon-reload
+  systemctl restart gemini-web2api
+  sleep 3
+  C=$(curl -s --max-time 8 -o /dev/null -w '%{http_code}' \
+      -H "Authorization: Bearer $NEW" "http://127.0.0.1:$PORT/v1/models" 2>/dev/null || echo 000)
+  echo
+  if [ "$C" = "200" ]; then
+    echo "✅ 轮换成功，新 API Key："
+    echo "   $NEW"
+  else
+    echo "⚠️ 轮换后自测返回 HTTP $C，检查: journalctl -u gemini-web2api -n 20"
+    echo "   新 Key: $NEW"
+  fi
 }
 
 do_uninstall() {
@@ -120,9 +192,12 @@ case "$1" in
   check)     run checkproxy.sh;           exit $? ;;
   fix)       run checkproxy.sh --disable; exit $? ;;
   status)    show_status;                 exit 0  ;;
+  creds|token) show_creds;                exit $? ;;
+  rotate)    rotate_key;                  exit $? ;;
   uninstall) do_uninstall;                exit 0  ;;
   ""|menu)   : ;;
-  *) echo "未知命令: $1"; echo "可用: master outbound addproxy local check fix status uninstall"; exit 1 ;;
+  *) echo "未知命令: $1"
+     echo "可用: master outbound addproxy local check fix status creds rotate uninstall"; exit 1 ;;
 esac
 
 # ── 交互菜单 ─────────────────────────────────────────────────
@@ -137,11 +212,13 @@ while :; do
   echo "  4) 让主控自己也成为出口槽"
   echo "  5) 代理池体检"
   echo "  6) 一键修复（禁用被封的代理）"
-  echo "  7) 状态总览"
-  echo "  8) 卸载"
+  echo "  7) 状态总览（含 Token / API Key / 面板地址）"
+  echo "  8) 查看凭据（Token / API Key）"
+  echo "  9) 轮换 API Key"
+  echo " 10) 卸载"
   echo "  0) 退出"
   echo
-  printf "选择 [0-8]: "
+  printf "选择 [0-10]: "
   read -r c
   echo
   case "$c" in
@@ -155,7 +232,9 @@ while :; do
     5) run checkproxy.sh || true ;;
     6) run checkproxy.sh --disable || true ;;
     7) show_status ;;
-    8) do_uninstall ;;
+    8) show_creds ;;
+    9) rotate_key ;;
+    10) do_uninstall ;;
     0) echo "再见"; exit 0 ;;
     *) echo "无效选择" ;;
   esac
