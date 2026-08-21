@@ -12,7 +12,7 @@
 #
 # 仓库：https://github.com/onshine/ScriptHubs/tree/main/gemini-web2api
 set -e
-SCRIPT_VERSION="R1.4.0"
+SCRIPT_VERSION="R1.4.1"
 DIR="/opt/gemini-web2api"
 
 [ "$(id -u)" = "0" ] || { echo "请用 root 运行"; exit 1; }
@@ -185,17 +185,28 @@ else
   esac
   NAME="${2:-出口$(date +%H%M%S)}"
 
-  echo "先测这个代理通不通..."
-  # 把 socks5h:// 转成 curl 认的形式测一下
-  TESTURL=$(echo "$URL" | sed 's|^socks5h://|socks5h://|; s|^socks5://|socks5://|')
-  OUT=$(curl -s --max-time 15 --proxy "$TESTURL" https://api64.ipify.org 2>/dev/null || echo "")
+  echo "测试代理连通性..."
+  OUT=$(curl -s --max-time 15 --proxy "$URL" https://api64.ipify.org 2>/dev/null || echo "")
   if [ -z "$OUT" ]; then
-    echo "⚠️ 代理测试失败（可能出口机防火墙没放行，或账号密码不对）"
+    echo "⚠️ 代理不可用（出口机未放行 / 账号密码错 / 服务未启动）"
     printf "仍然加入池子？[y/N] "
     read -r yn
     [ "$yn" = "y" ] || [ "$yn" = "Y" ] || { echo "已取消"; exit 1; }
   else
-    echo "✅ 代理可用，出口 IP：$OUT"
+    echo "   出口 IP：$OUT"
+    # 关键：还要能连通 Google，否则加进池子只会让请求整体失败
+    # （代理池非空时上游不回退直连，坏代理会直接拖垮服务）
+    GCODE=$(curl -s --max-time 20 --proxy "$URL" -o /dev/null \
+            -w '%{http_code}' https://gemini.google.com/ 2>/dev/null || echo 000)
+    case "$GCODE" in
+      2*|3*) echo "✅ 可连通 Google (HTTP $GCODE)" ;;
+      000)   echo "❌ 无法连通 gemini.google.com（该出口到 Google 不通）"
+             echo "   加进池子会导致请求失败——代理池非空时上游不回退直连。"
+             printf "仍然加入？[y/N] "
+             read -r yn
+             [ "$yn" = "y" ] || [ "$yn" = "Y" ] || { echo "已取消"; exit 1; } ;;
+      *)     echo "⚠️ Google 返回 HTTP $GCODE（可能该 IP 已被风控）" ;;
+    esac
   fi
 fi
 

@@ -140,6 +140,21 @@ https://raw.githubusercontent.com/onshine/ScriptHubs/main/gemini-web2api/Gemini_
 
 ---
 
+## 代理加了之后请求全失败？
+
+**代理池非空时，上游绝不回退直连** —— 所以只要池子里有坏代理被轮到，请求就失败。
+先体检：
+
+```bash
+curl -fL -o checkproxy.sh "https://raw.githubusercontent.com/onshine/ScriptHubs/main/gemini-web2api/checkproxy.sh?$(date +%s)"
+chmod +x checkproxy.sh
+sudo ./checkproxy.sh              # 逐个测出口 IP + Google 连通性
+sudo ./checkproxy.sh --disable    # 自动禁用连不上 Google 的
+```
+
+常见原因：出口机绑了到 Google 不通的 IPv6（R1.4.1 已修，重跑 `outbound.sh` 即可），
+或出口 IP 已被 Google 风控（返回 302 到 /sorry/）。
+
 ## 运维命令
 
 ```bash
@@ -191,6 +206,7 @@ A：不会。上游只存元数据（模型、延迟、token 数、状态码）�
 
 | 版本 | 变更 |
 |---|---|
+| R1.4.1 | **修复强制绑定 IPv6 导致出口断网**：原先"有 v6 就绑"，但 microsocks 的 `-b` 会让它优先选与绑定地址同族的目标（`sockssrv.c` 的 `addr_choose`），若该 v6 到 Google 不通就彻底连不上。改为先实测 `curl -6 gemini.google.com` 可达才绑定，否则交由系统按 RFC 6724 自动选路（本来就优先 v6）；需强制绑定可加 `--force-v6`。`addproxy.sh` 加代理前除测出口 IP 外，**新增实测能否连通 gemini.google.com**，不通时明确警告（代理池非空时上游不回退直连，一个坏代理会拖垮整个服务）。**新增 `checkproxy.sh`** 批量体检代理池，`--disable` 自动禁用坏代理 |
 | R1.4.0 | **双引擎 + 强制 IPv6 出口**。部分系统源里没有 dante-server（报 `Unable to locate package`），新增 microsocks 源码编译回退（仅依赖 gcc，无 glibc 版本坑）。出口地址不再依赖系统默认路由：自动探测全局 IPv6 并显式绑定（dante 用 `external: <v6>`，microsocks 用 `-b <v6>`），确保「优先 IPv6 出口」。自检会明确报告实际走的是 v6 还是 v4；有 v6 的机器同时给出 v4 入口地址，方便无 v6 的主控连接 |
 | R1.3.8 | 下载前额外 `pkill` 掉不受 systemd 管的手工前台实例（它们同样会占用二进制导致 `Text file busy`）；失败时若检测到残留进程，直接给出 pkill 命令 |
 | R1.3.7 | 修复重跑时 `Text file busy`：运行中的可执行文件无法被 curl 直接覆盖。改为先 stop 服务、下载到 `.new` 临时文件、验证 `--version` 可执行后再 `mv` 原子替换（坏包不会顶掉可用版本）。下载失败的报错也不再一律归咎于 IPv6，改为列出 GitHub 连通性 / NAT64 / scp 三条排查方向 |

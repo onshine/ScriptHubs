@@ -5,10 +5,16 @@
 #
 # 用 dante-server（Debian/Ubuntu 官方源自带，无 glibc 依赖坑）。
 set -e
-SCRIPT_VERSION="R1.4.0"
+SCRIPT_VERSION="R1.4.1"
 PORT=1080
 CFG=/etc/danted-gw.conf
 SVC=danted-gw
+
+# --force-v6：强制绑定 IPv6 出口（默认交由系统选路，更稳）
+FORCE_V6=0
+for a in "$@"; do
+  [ "$a" = "--force-v6" ] && FORCE_V6=1
+done
 
 [ "$(id -u)" = "0" ] || { echo "请用 root 运行"; exit 1; }
 echo "=== 出口机部署 $SCRIPT_VERSION ==="
@@ -82,14 +88,22 @@ IFACE=$(ip -o -6 route show default 2>/dev/null | awk '{print $5}' | head -1)
 [ -n "$IFACE" ] || IFACE=$(ip -o -4 route show default 2>/dev/null | awk '{print $5}' | head -1)
 [ -n "$IFACE" ] || IFACE=$(ip -o link show 2>/dev/null | awk -F': ' '$2!="lo"{print $2; exit}')
 [ -n "$IFACE" ] || { echo "❌ 找不到网卡"; exit 1; }
-# 取一个全局 IPv6 地址（优先 IPv6 出口的关键）
+# 探测全局 IPv6，并实测它能否真正连通 Google。
+# 关键：不能"有 v6 就强制绑定"——若该 v6 到 Google 不通，绑死会直接断网。
 BINDV6=$(ip -6 addr show scope global 2>/dev/null \
          | sed -n 's/.*inet6 \([0-9a-fA-F:]*\)\/.*/\1/p' \
          | grep -v '^fe80' | grep -v '^fd' | head -1)
+V6OK=0
 if [ -n "$BINDV6" ]; then
-  echo "      网卡 $IFACE，IPv6 出口 $BINDV6"
+  if curl -6 -s --max-time 8 -o /dev/null -w '%{http_code}' \
+       https://gemini.google.com/ 2>/dev/null | grep -qE '^[23]'; then
+    V6OK=1
+    echo "      网卡 $IFACE，IPv6 $BINDV6 → Google 可达 ✅"
+  else
+    echo "      网卡 $IFACE，⚠️ 有 IPv6 但连不上 Google，将交由系统自动选路"
+  fi
 else
-  echo "      网卡 $IFACE，⚠️ 无全局 IPv6，将走 IPv4 出口"
+  echo "      网卡 $IFACE，无全局 IPv6，走 IPv4 出口"
 fi
 
 # ── 3. 账号密码（随机，防止变成公共代理）──────────────────────
@@ -106,7 +120,8 @@ if [ "$ENGINE" = "dante" ]; then
   id "$USER" >/dev/null 2>&1 || useradd -r -M -s /usr/sbin/nologin "$USER"
   echo "$USER:$PASS" | chpasswd
   # external 指定 v6 地址 → 出站强制从该 v6 发起；无 v6 时退回网卡名
-  EXT="${BINDV6:-$IFACE}"
+  # v6 实测可达才显式指定；否则给网卡名，让 dante 按目标地址族自动选源
+  if [ "$V6OK" = "1" ]; then EXT="$BINDV6"; else EXT="$IFACE"; fi
   cat > "$CFG" <<EOF
 # gemini-web2api 出口 $SCRIPT_VERSION
 logoutput: syslog
@@ -140,7 +155,9 @@ EOF
 else
   # microsocks：-b 绑定出口地址，-i 监听地址
   BIN=$(command -v microsocks)
-  if [ -n "$BINDV6" ]; then
+  # 注意：microsocks 的 -b 会让它优先选与绑定地址同族的目标地址
+  # （sockssrv.c addr_choose），v6 不通时会彻底连不上。故仅在实测可达时绑定。
+  if [ "$V6OK" = "1" ] && [ "$FORCE_V6" = "1" ]; then
     EXECLINE="$BIN -i :: -p $PORT -u $USER -P $PASS -b $BINDV6"
   else
     EXECLINE="$BIN -i :: -p $PORT -u $USER -P $PASS"
