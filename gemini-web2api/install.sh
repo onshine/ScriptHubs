@@ -4,7 +4,7 @@
 # 支持：纯 IPv6 / 纯 IPv4 / 双栈 VPS（Debian / Ubuntu / CentOS，systemd）
 # 仓库：https://github.com/onshine/ScriptHubs/tree/main/gemini-web2api
 set -e
-SCRIPT_VERSION="R1.3.1"
+SCRIPT_VERSION="R1.3.2"
 VER="v4.0.0"
 PORT="${1:-8084}"
 DIR="/opt/gemini-web2api"
@@ -56,11 +56,11 @@ chmod +x gemini-web2api
 
 # 4. config.json —— host 必须 :: 才能同时监听 v4+v6
 #    上游默认 0.0.0.0 是 IPv4 通配符，且没有 --host 参数，纯 v6 机外部连不上。
-echo "[4/6] 写 config.json（host=:: 双栈监听）"
+echo "[4/6] 写 config.json（host=[::] 双栈监听）"
 cat > config.json <<EOF
 {
   "port": $PORT,
-  "host": "::",
+  "host": "[::]",
   "db_path": "$DIR/data/gemini.db",
   "admin_enabled": true,
   "impersonate": "chrome_146",
@@ -108,12 +108,42 @@ WantedBy=multi-user.target
 EOF
 chmod 600 /etc/systemd/system/$SVC.service
 systemctl daemon-reload
+
+# 先前台试跑 3 秒，能提前暴露配置类错误（比如监听地址写法不对）
+echo "      预检启动..."
+PRE=$(cd "$DIR" && timeout 4 sudo -u gemini env ADMIN_TOKEN="$TOK" API_KEY="$APIKEY" \
+      "$DIR/gemini-web2api" --config "$DIR/config.json" --port "$PORT" \
+      --db "$DIR/data/gemini.db" 2>&1 || true)
+if echo "$PRE" | grep -qi "too many colons\|invalid.*address"; then
+  # 极少数环境不吃 [::]，回退成 0.0.0.0（仅 IPv4，但至少能起来）
+  echo "      ⚠️ [::] 不被接受，回退 0.0.0.0（仅 IPv4 监听）"
+  sed -i 's|"host": "\[::\]"|"host": "0.0.0.0"|' "$DIR/config.json"
+  chown gemini:gemini "$DIR/config.json"
+  PRE=$(cd "$DIR" && timeout 4 sudo -u gemini env ADMIN_TOKEN="$TOK" API_KEY="$APIKEY" \
+        "$DIR/gemini-web2api" --config "$DIR/config.json" --port "$PORT" \
+        --db "$DIR/data/gemini.db" 2>&1 || true)
+fi
+if echo "$PRE" | grep -qi "server error\|permission denied\|no such file"; then
+  echo "❌ 预检失败，错误信息："
+  echo "$PRE" | grep -i "error\|denied\|no such" | head -5 | sed 's/^/     /'
+  echo
+  echo "   config.json 内容："
+  sed 's/^/     /' "$DIR/config.json"
+  exit 1
+fi
+
 systemctl enable --now $SVC >/dev/null 2>&1
 
 # 6. 自检
 echo "[6/6] 自检"
 sleep 3
-systemctl is-active --quiet $SVC || { echo "启动失败：journalctl -u $SVC -n 50"; exit 1; }
+if ! systemctl is-active --quiet $SVC; then
+  echo "❌ 启动失败，最近日志："
+  journalctl -u $SVC -n 25 --no-pager 2>/dev/null | grep -v "^--" | sed 's/^/     /'
+  echo
+  echo "   手动排查: cd $DIR && sudo -u gemini ./gemini-web2api --config config.json --port $PORT --db data/gemini.db"
+  exit 1
+fi
 LISTEN=$(ss -tlnH "sport = :$PORT" 2>/dev/null | awk '{print $4}' | head -1)
 HEALTH=$(curl -s --max-time 5 "http://127.0.0.1:$PORT/" || echo FAIL)
 V4=$(curl -4 -s --max-time 6 https://api.ipify.org 2>/dev/null || echo "")

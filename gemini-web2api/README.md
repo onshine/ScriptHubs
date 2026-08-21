@@ -68,7 +68,7 @@ sudo ./addproxy.sh --list      # 看池子
 
 **坑 1：主控机 IP 会闲置。** 上游代码写死了——**代理池非空时绝不回退直连**（防止代理满了把主控 IP 也打爆）。所以只加了出口机的话，主控自己的 IP 一次都不用。想让它也干活，跑一次 `addproxy.sh --local`（在主控本机装个只听 127.0.0.1 的 socks5 加进池子）。
 
-**坑 2：纯 IPv6 主控外部连不上。** 上游默认监听 `0.0.0.0`（IPv4 通配符），而且**没有 `--host` 参数**。`install.sh` 已自动写 `config.json` 设 `host: "::"` 双栈监听。自查：
+**坑 2：纯 IPv6 主控外部连不上。** 上游默认监听 `0.0.0.0`（IPv4 通配符），而且**没有 `--host` 参数**。`install.sh` 已自动写 `config.json` 设 `host: "[::]"` 双栈监听（注意必须带方括号，上游是 `fmt.Sprintf("%s:%d")` 拼接，填 `::` 会拼成非法的 `:::8084`）。自查：
 
 ```bash
 ss -tlnp | grep 8084     # 要看到 [::] 或 *，不能是 0.0.0.0
@@ -179,6 +179,7 @@ A：不会。上游只存元数据（模型、延迟、token 数、状态码）�
 
 | 版本 | 变更 |
 |---|---|
+| R1.3.2 | 修复主控启动失败 `too many colons in address`：上游用 `fmt.Sprintf("%s:%d", host, port)` 拼监听地址，`host` 填 `::` 会拼成非法的 `:::8084`，Go 要求 IPv6 通配符必须写 `[::]`。另新增：装服务前先前台预检启动 4 秒提前暴露配置错误、`[::]` 不被接受时自动回退 `0.0.0.0`、自检失败直接打印 journalctl 日志与手动排查命令（不再只提示"去看日志"） |
 | R1.3.1 | 三个脚本均加入**自愈逻辑**：启动时检测 dpkg 里处于"已解包未配置"（iU/iF）状态的残留 3proxy 并自动 purge + `apt --fix-broken install`。此前若跑过 R1.2.0，损坏的 3proxy 会卡住 apt 安装**任何**包，导致 R1.3.0 也装不上 dante；安装失败时给出明确自救命令 |
 | R1.3.0 | **改用 dante-server 替代 3proxy**。根因：3proxy 不在 Debian 12 官方源里，而官方 0.9.9 deb 要求 glibc ≥ 2.38，Debian 12 只有 2.36 → 装上也跑不起来（`GLIBC_2.38 not found`）；且 dpkg 解包后 `command -v` 能找到文件，导致脚本误判成功。dante-server 在 Debian/Ubuntu 官方源自带，无依赖坑。服务名 `danted-gw`(1080) / `danted-local`(1081)，配置独立不冲突；自动停用 Debian 自带的空配置 danted 服务 |
 | R1.2.0 | 修复 3proxy 安装 404（官方 deb 资产名是 `x86_64`/`arm64` 而非 dpkg 的 `amd64`，且写死的 0.9.4 已下架）。改为三级回退：系统源 → 官方 deb/rpm（版本动态取 latest tag）→ 源码编译；不再用 `-qq` 吞掉错误，失败时打印 journalctl 日志；`--local` 改用独立配置与服务名 `3proxy-local`(1081)，避免与出口机的 3proxy(1080) 互相覆盖 |
