@@ -12,7 +12,7 @@
 #
 # 仓库：https://github.com/onshine/ScriptHubs/tree/main/gemini-web2api
 set -e
-SCRIPT_VERSION="R1.3.8"
+SCRIPT_VERSION="R1.4.0"
 DIR="/opt/gemini-web2api"
 
 [ "$(id -u)" = "0" ] || { echo "请用 root 运行"; exit 1; }
@@ -67,25 +67,38 @@ fi
   LCFG=/etc/danted-local.conf
   LSVC=danted-local
 
+  LENGINE=""
   if command -v danted >/dev/null 2>&1 || command -v sockd >/dev/null 2>&1; then
-    echo "[1/3] dante 已安装，跳过"
+    LENGINE=dante; echo "[1/3] dante 已安装"
+  elif command -v microsocks >/dev/null 2>&1; then
+    LENGINE=microsocks; echo "[1/3] microsocks 已安装"
   else
-    echo "[1/3] 安装 dante-server"
+    echo "[1/3] 安装 socks5 服务端"
     if command -v apt-get >/dev/null 2>&1; then
       apt-get update -qq || true
-      if ! DEBIAN_FRONTEND=noninteractive apt-get install -y dante-server; then
-        echo "❌ 安装失败。若报别的包依赖冲突，先执行："
-        echo "   dpkg --purge --force-all <包名>; apt --fix-broken install -y"
-        exit 1
-      fi
+      DEBIAN_FRONTEND=noninteractive apt-get install -y dante-server >/dev/null 2>&1 && LENGINE=dante
     elif command -v yum >/dev/null 2>&1; then
-      yum install -y dante-server || { echo "❌ 安装失败"; exit 1; }
-    else
-      echo "❌ 不支持的发行版"; exit 1
+      yum install -y dante-server >/dev/null 2>&1 && LENGINE=dante
+    fi
+    if [ -z "$LENGINE" ]; then
+      echo "      源里没有 dante，编译 microsocks"
+      if command -v apt-get >/dev/null 2>&1; then
+        apt-get install -y gcc make libc6-dev >/dev/null 2>&1 || apt-get install -y build-essential >/dev/null 2>&1
+      else
+        yum install -y gcc make >/dev/null 2>&1
+      fi
+      command -v gcc >/dev/null 2>&1 || { echo "❌ 装不上 gcc"; exit 1; }
+      MTAG=$(curl -fsSL https://api.github.com/repos/rofl0r/microsocks/releases/latest 2>/dev/null \
+             | sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p' | head -1)
+      [ -n "$MTAG" ] || MTAG=v1.0.5
+      rm -rf /tmp/microsocks && mkdir -p /tmp/microsocks
+      curl -fsSL "https://github.com/rofl0r/microsocks/archive/refs/tags/$MTAG.tar.gz" -o /tmp/ms.tar.gz \
+        && tar xzf /tmp/ms.tar.gz -C /tmp/microsocks --strip-components=1 \
+        && ( cd /tmp/microsocks && make >/dev/null 2>&1 && install -m755 microsocks /usr/local/bin/microsocks ) \
+        || { echo "❌ microsocks 安装失败"; exit 1; }
+      LENGINE=microsocks; echo "      ✅ microsocks $MTAG"
     fi
   fi
-  LBIN=$(command -v danted || command -v sockd)
-  [ -n "$LBIN" ] || { echo "❌ 找不到 danted"; exit 1; }
   systemctl disable --now danted >/dev/null 2>&1 || true
 
   IFACE=$(ip -o -6 route show default 2>/dev/null | awk '{print $5}' | head -1)
@@ -97,8 +110,12 @@ fi
   id "$LU" >/dev/null 2>&1 || useradd -r -M -s /usr/sbin/nologin "$LU"
   echo "$LU:$LP" | chpasswd
 
-  # 独立配置与服务名，和 outbound.sh 的 danted-gw(1080) 共存不冲突
-  cat > "$LCFG" <<EOF
+  # 独立配置与服务名，和 outbound.sh 的出口服务(1080)共存不冲突
+  if [ "$LENGINE" = "dante" ]; then
+    LBIN=$(command -v danted || command -v sockd)
+    id "$LU" >/dev/null 2>&1 || useradd -r -M -s /usr/sbin/nologin "$LU"
+    echo "$LU:$LP" | chpasswd
+    cat > "$LCFG" <<EOF
 # gemini-web2api 本机出口槽
 logoutput: syslog
 internal: 127.0.0.1 port = $LPORT
@@ -116,22 +133,29 @@ socks pass {
     log: error
 }
 EOF
-  chmod 644 "$LCFG"
+    chmod 644 "$LCFG"
+    LEXEC="$LBIN -f $LCFG -N 1"
+  else
+    LBIN=$(command -v microsocks)
+    LEXEC="$LBIN -i 127.0.0.1 -p $LPORT -u $LU -P $LP"
+  fi
+
   cat > /etc/systemd/system/$LSVC.service <<EOF
 [Unit]
-Description=Dante socks5 (local outbound slot for gemini-web2api)
+Description=socks5 local outbound slot for gemini-web2api ($LENGINE)
 After=network-online.target
 Wants=network-online.target
 
 [Service]
 Type=simple
-ExecStart=$LBIN -f $LCFG -N 1
+ExecStart=$LEXEC
 Restart=on-failure
 RestartSec=5
 
 [Install]
 WantedBy=multi-user.target
 EOF
+  chmod 600 /etc/systemd/system/$LSVC.service
   echo "[2/3] 启动本地 socks5 (127.0.0.1:$LPORT)"
   systemctl daemon-reload
   systemctl enable $LSVC >/dev/null 2>&1
@@ -139,9 +163,10 @@ EOF
   sleep 2
   if ! systemctl is-active --quiet $LSVC; then
     echo "❌ 启动失败，日志："
-    journalctl -u $LSVC -n 20 --no-pager 2>/dev/null || true
+    journalctl -u $LSVC -n 20 --no-pager 2>/dev/null | sed 's/^/     /'
     exit 1
   fi
+  echo "[3/3] 加入代理池"
   URL="socks5h://$LU:$LP@127.0.0.1:$LPORT"
   NAME="本机出口"
   echo "[3/3] 加入代理池"

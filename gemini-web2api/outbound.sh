@@ -5,7 +5,7 @@
 #
 # 用 dante-server（Debian/Ubuntu 官方源自带，无 glibc 依赖坑）。
 set -e
-SCRIPT_VERSION="R1.3.8"
+SCRIPT_VERSION="R1.4.0"
 PORT=1080
 CFG=/etc/danted-gw.conf
 SVC=danted-gw
@@ -31,61 +31,88 @@ if command -v dpkg >/dev/null 2>&1; then
   fi
 fi
 
-# ── 1. 安装 dante-server ─────────────────────────────────────
+# ── 1. 安装 socks5 服务端 ────────────────────────────────────
+# 优先 dante-server（源里有就用）；没有则编译 microsocks
+# （极简 socks5，只依赖 gcc，支持 -b 绑定出口 IP）
+ENGINE=""
 if command -v danted >/dev/null 2>&1 || command -v sockd >/dev/null 2>&1; then
-  echo "[1/5] dante 已安装，跳过"
+  ENGINE=dante; echo "[1/5] dante 已安装"
+elif command -v microsocks >/dev/null 2>&1; then
+  ENGINE=microsocks; echo "[1/5] microsocks 已安装"
 else
-  echo "[1/5] 安装 dante-server"
+  echo "[1/5] 安装 socks5 服务端"
   if command -v apt-get >/dev/null 2>&1; then
     apt-get update -qq || true
-    if ! DEBIAN_FRONTEND=noninteractive apt-get install -y dante-server; then
-      echo
-      echo "❌ dante-server 安装失败。若上面报的是别的包依赖冲突（unmet dependencies），"
-      echo "   说明 dpkg 里有半装的包卡住了，先执行："
-      echo "     dpkg --purge --force-all <那个包名>; apt --fix-broken install -y"
-      echo "   然后重跑本脚本。"
-      exit 1
+    if DEBIAN_FRONTEND=noninteractive apt-get install -y dante-server >/dev/null 2>&1; then
+      ENGINE=dante; echo "      ✅ dante-server (apt)"
     fi
   elif command -v yum >/dev/null 2>&1; then
-    yum install -y dante-server || { echo "❌ 安装失败"; exit 1; }
-  else
-    echo "❌ 不支持的发行版，请手动安装 dante-server"; exit 1
+    yum install -y dante-server >/dev/null 2>&1 && ENGINE=dante
+  fi
+  # 回退：编译 microsocks
+  if [ -z "$ENGINE" ]; then
+    echo "      源里没有 dante，改为编译 microsocks"
+    if command -v apt-get >/dev/null 2>&1; then
+      apt-get install -y gcc make libc6-dev >/dev/null 2>&1 || \
+        apt-get install -y build-essential >/dev/null 2>&1
+    else
+      yum install -y gcc make >/dev/null 2>&1 || \
+        yum groupinstall -y "Development Tools" >/dev/null 2>&1
+    fi
+    command -v gcc >/dev/null 2>&1 || { echo "❌ 装不上 gcc，无法继续"; exit 1; }
+    MTAG=$(curl -fsSL https://api.github.com/repos/rofl0r/microsocks/releases/latest 2>/dev/null \
+           | sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p' | head -1)
+    [ -n "$MTAG" ] || MTAG=v1.0.5
+    rm -rf /tmp/microsocks && mkdir -p /tmp/microsocks
+    curl -fsSL "https://github.com/rofl0r/microsocks/archive/refs/tags/$MTAG.tar.gz" \
+      -o /tmp/ms.tar.gz || { echo "❌ 下载 microsocks 源码失败"; exit 1; }
+    tar xzf /tmp/ms.tar.gz -C /tmp/microsocks --strip-components=1 || { echo "❌ 解包失败"; exit 1; }
+    ( cd /tmp/microsocks && make >/dev/null 2>&1 && install -m755 microsocks /usr/local/bin/microsocks ) \
+      || { echo "❌ 编译失败"; exit 1; }
+    command -v microsocks >/dev/null 2>&1 || { echo "❌ microsocks 安装失败"; exit 1; }
+    ENGINE=microsocks; echo "      ✅ microsocks $MTAG (源码编译)"
   fi
 fi
-BIN=$(command -v danted || command -v sockd)
-[ -n "$BIN" ] || { echo "❌ 找不到 danted 可执行文件"; exit 1; }
-# Debian 装完自带一个默认 danted 服务，其默认配置会启动失败，先停掉避免干扰
+# Debian 装完自带一个空配置 danted 服务会反复失败，停掉避免干扰
 systemctl disable --now danted >/dev/null 2>&1 || true
-echo "      使用 $BIN"
 
-# ── 2. 探测网卡 ──────────────────────────────────────────────
+# ── 2. 探测网络 ──────────────────────────────────────────────
 echo "[2/5] 探测网络"
 IFACE=$(ip -o -6 route show default 2>/dev/null | awk '{print $5}' | head -1)
 [ -n "$IFACE" ] || IFACE=$(ip -o -4 route show default 2>/dev/null | awk '{print $5}' | head -1)
 [ -n "$IFACE" ] || IFACE=$(ip -o link show 2>/dev/null | awk -F': ' '$2!="lo"{print $2; exit}')
 [ -n "$IFACE" ] || { echo "❌ 找不到网卡"; exit 1; }
-NV6=$(ip -6 addr show scope global 2>/dev/null | grep -c inet6 || true)
-echo "      网卡 $IFACE，全局 IPv6 地址 ${NV6:-0} 个"
+# 取一个全局 IPv6 地址（优先 IPv6 出口的关键）
+BINDV6=$(ip -6 addr show scope global 2>/dev/null \
+         | sed -n 's/.*inet6 \([0-9a-fA-F:]*\)\/.*/\1/p' \
+         | grep -v '^fe80' | grep -v '^fd' | head -1)
+if [ -n "$BINDV6" ]; then
+  echo "      网卡 $IFACE，IPv6 出口 $BINDV6"
+else
+  echo "      网卡 $IFACE，⚠️ 无全局 IPv6，将走 IPv4 出口"
+fi
 
 # ── 3. 账号密码（随机，防止变成公共代理）──────────────────────
 echo "[3/5] 生成代理账号"
 gen() { tr -dc 'a-z0-9' < /dev/urandom | head -c "${1:-16}"; }
 USER="gw$(gen 6)"
 PASS=$(gen 20)
-# dante 用系统用户认证：建一个不能登录 shell 的专用用户
-id "$USER" >/dev/null 2>&1 || useradd -r -M -s /usr/sbin/nologin "$USER"
-echo "$USER:$PASS" | chpasswd
 
-# ── 4. 配置 ──────────────────────────────────────────────────
-echo "[4/5] 写配置"
-# external 写网卡名 → dante 按目标地址族自动选源地址：
-# 目标是 v6 就从本机 v6 出，这正是要的「IPv6 出口」。
-cat > "$CFG" <<EOF
+# ── 4. 配置并启动 ────────────────────────────────────────────
+echo "[4/5] 配置并启动 ($ENGINE)"
+if [ "$ENGINE" = "dante" ]; then
+  BIN=$(command -v danted || command -v sockd)
+  # dante 用系统用户认证
+  id "$USER" >/dev/null 2>&1 || useradd -r -M -s /usr/sbin/nologin "$USER"
+  echo "$USER:$PASS" | chpasswd
+  # external 指定 v6 地址 → 出站强制从该 v6 发起；无 v6 时退回网卡名
+  EXT="${BINDV6:-$IFACE}"
+  cat > "$CFG" <<EOF
 # gemini-web2api 出口 $SCRIPT_VERSION
 logoutput: syslog
 internal: 0.0.0.0 port = $PORT
 internal: :: port = $PORT
-external: $IFACE
+external: $EXT
 socksmethod: username
 user.privileged: root
 user.unprivileged: nobody
@@ -108,17 +135,27 @@ socks pass {
     log: error
 }
 EOF
-chmod 644 "$CFG"
+  chmod 644 "$CFG"
+  EXECLINE="$BIN -f $CFG -N 1"
+else
+  # microsocks：-b 绑定出口地址，-i 监听地址
+  BIN=$(command -v microsocks)
+  if [ -n "$BINDV6" ]; then
+    EXECLINE="$BIN -i :: -p $PORT -u $USER -P $PASS -b $BINDV6"
+  else
+    EXECLINE="$BIN -i :: -p $PORT -u $USER -P $PASS"
+  fi
+fi
 
 cat > /etc/systemd/system/$SVC.service <<EOF
 [Unit]
-Description=Dante socks5 (gemini-web2api outbound)
+Description=socks5 outbound for gemini-web2api ($ENGINE)
 After=network-online.target
 Wants=network-online.target
 
 [Service]
 Type=simple
-ExecStart=$BIN -f $CFG -N 1
+ExecStart=$EXECLINE
 Restart=on-failure
 RestartSec=5
 LimitNOFILE=65535
@@ -126,6 +163,7 @@ LimitNOFILE=65535
 [Install]
 WantedBy=multi-user.target
 EOF
+chmod 600 /etc/systemd/system/$SVC.service   # microsocks 密码在命令行，锁权限
 
 systemctl daemon-reload
 systemctl enable $SVC >/dev/null 2>&1
@@ -136,33 +174,42 @@ sleep 2
 echo "[5/5] 自检"
 if ! systemctl is-active --quiet $SVC; then
   echo "❌ 启动失败，最近日志："
-  journalctl -u $SVC -n 25 --no-pager 2>/dev/null || true
+  journalctl -u $SVC -n 25 --no-pager 2>/dev/null | sed 's/^/     /'
   echo
-  echo "手动排查：$BIN -f $CFG -d"
+  echo "手动排查：$EXECLINE"
   exit 1
 fi
 ss -tlnH "sport = :$PORT" 2>/dev/null | awk '{print "      监听: "$4}' | sort -u
 
 V6=$(curl -6 -s --max-time 8 https://api64.ipify.org 2>/dev/null || echo "")
 V4=$(curl -4 -s --max-time 8 https://api.ipify.org 2>/dev/null || echo "")
+# 通过自己的代理测出口 IP，确认认证与转发都正常
 OUT=$(curl -s --max-time 15 --proxy "socks5h://$USER:$PASS@127.0.0.1:$PORT" \
       https://api64.ipify.org 2>/dev/null || echo "")
 
 echo
 echo "=============================================================="
 if [ -n "$OUT" ]; then
-  echo "  ✅ 出口机就绪（代理实测可用，出口 IP: $OUT）"
+  case "$OUT" in
+    *:*) echo "  ✅ 出口机就绪 — 走 IPv6 出口: $OUT" ;;
+    *)   echo "  ✅ 出口机就绪 — 走 IPv4 出口: $OUT"
+         [ -n "$BINDV6" ] && echo "     ⚠️ 本机有 v6 但出口是 v4，检查 v6 出网: curl -6 https://api64.ipify.org" ;;
+  esac
 else
   echo "  ⚠️ 服务已启动，但本机代理自测未通"
   echo "     排查: journalctl -u $SVC -n 30"
 fi
+echo "  引擎        : $ENGINE"
 echo "  本机 IPv6   : ${V6:-无}"
-echo "  本机 IPv4   : ${V4:-无（纯 v6 机）}"
+echo "  本机 IPv4   : ${V4:-无}"
 echo "--------------------------------------------------------------"
 echo "  复制下面这一整行，拿到主控机用："
 echo
+# 给主控连的地址：优先 v6（主控若无 v6 则用 v4）
 if [ -n "$V6" ]; then
   echo "  socks5h://$USER:$PASS@[$V6]:$PORT"
+  [ -n "$V4" ] && { echo; echo "  主控没有 IPv6 就用这个（v4 入口、v6 出口）："; \
+                    echo "  socks5h://$USER:$PASS@$V4:$PORT"; }
 else
   echo "  socks5h://$USER:$PASS@$V4:$PORT"
 fi

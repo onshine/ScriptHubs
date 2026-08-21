@@ -152,12 +152,8 @@ systemctl status danted-local          # 主控本机出口槽（--local 装的�
 
 ## 装不上 socks5 怎么办
 
-出口用的是 **dante-server**（Debian / Ubuntu 官方源自带）。若安装失败：
-
-```bash
-apt update && apt install -y dante-server
-./outbound.sh              # 再跑一次，会自动跳过安装步骤
-```
+脚本会自动二选一：优先 apt 装 **dante-server**，源里没有就编译 **microsocks**
+（极简 socks5，只依赖 gcc）。两条路都失败才会报错，通常无需干预。
 
 **跑过 R1.2.0 装坏了 3proxy？** R1.3.1 起脚本会自动检测并清理，直接重跑即可。
 
@@ -195,6 +191,7 @@ A：不会。上游只存元数据（模型、延迟、token 数、状态码）�
 
 | 版本 | 变更 |
 |---|---|
+| R1.4.0 | **双引擎 + 强制 IPv6 出口**。部分系统源里没有 dante-server（报 `Unable to locate package`），新增 microsocks 源码编译回退（仅依赖 gcc，无 glibc 版本坑）。出口地址不再依赖系统默认路由：自动探测全局 IPv6 并显式绑定（dante 用 `external: <v6>`，microsocks 用 `-b <v6>`），确保「优先 IPv6 出口」。自检会明确报告实际走的是 v6 还是 v4；有 v6 的机器同时给出 v4 入口地址，方便无 v6 的主控连接 |
 | R1.3.8 | 下载前额外 `pkill` 掉不受 systemd 管的手工前台实例（它们同样会占用二进制导致 `Text file busy`）；失败时若检测到残留进程，直接给出 pkill 命令 |
 | R1.3.7 | 修复重跑时 `Text file busy`：运行中的可执行文件无法被 curl 直接覆盖。改为先 stop 服务、下载到 `.new` 临时文件、验证 `--version` 可执行后再 `mv` 原子替换（坏包不会顶掉可用版本）。下载失败的报错也不再一律归咎于 IPv6，改为列出 GitHub 连通性 / NAT64 / scp 三条排查方向 |
 | R1.3.6 | 修复 `source .credentials` 时文件里的 `PORT=` 会覆盖命令行指定端口的问题；补充 7 项本地逻辑测试（参数解析 / 凭据复用与重生 / 端口不被覆盖 / config.json 合法性 / 回退 sed）全部通过 |
