@@ -4,7 +4,7 @@
 # 支持：纯 IPv6 / 纯 IPv4 / 双栈 VPS（Debian / Ubuntu / CentOS，systemd）
 # 仓库：https://github.com/onshine/ScriptHubs/tree/main/gemini-web2api
 set -e
-SCRIPT_VERSION="R1.3.4"
+SCRIPT_VERSION="R1.3.5"
 VER="v4.0.0"
 REGEN=0
 PORT=8084
@@ -102,10 +102,54 @@ cat > config.json <<EOF
 }
 EOF
 
-# 5. systemd
-echo "[5/6] 安装服务"
+# 5. 预检 + 安装服务
+echo "[5/6] 预检与安装服务"
 id gemini >/dev/null 2>&1 || useradd -r -s /usr/sbin/nologin gemini
 chown -R gemini:gemini "$DIR"
+
+# 先停旧服务（重跑场景），否则预检必然撞 "address already in use"
+systemctl stop $SVC >/dev/null 2>&1 || true
+i=0
+while [ $i -lt 12 ]; do
+  ss -tlnH "sport = :$PORT" 2>/dev/null | grep -q . || break
+  sleep 0.5; i=$((i+1))
+done
+if ss -tlnH "sport = :$PORT" 2>/dev/null | grep -q .; then
+  echo "❌ 端口 $PORT 已被占用，占用者："
+  ss -tlnpH "sport = :$PORT" 2>/dev/null | sed 's/^/     /'
+  echo
+  echo "   换端口重跑:  sudo ./install.sh 9000"
+  exit 1
+fi
+
+# 预检：前台试跑 4 秒。放在写 unit 之前，避免"unit 已是新凭据但服务没重启"
+# 导致运行中进程与 .credentials 不一致。
+echo "      预检启动..."
+run_pre() {
+  cd "$DIR" && timeout 4 sudo -u gemini env ADMIN_TOKEN="$TOK" API_KEY="$APIKEY" \
+    "$DIR/gemini-web2api" --config "$DIR/config.json" --port "$PORT" \
+    --db "$DIR/data/gemini.db" 2>&1 || true
+}
+PRE=$(run_pre)
+if echo "$PRE" | grep -qi "too many colons\|invalid.*address"; then
+  echo "      ⚠️ [::] 不被接受，回退 0.0.0.0（仅 IPv4 监听）"
+  sed -i 's|"host": "\[::\]"|"host": "0.0.0.0"|' "$DIR/config.json"
+  chown gemini:gemini "$DIR/config.json"
+  PRE=$(run_pre)
+fi
+if echo "$PRE" | grep -qi "server error\|permission denied\|no such file"; then
+  echo "❌ 预检失败，错误信息："
+  echo "$PRE" | grep -i "error\|denied\|no such" | head -5 | sed 's/^/     /'
+  echo
+  echo "   config.json 内容："
+  sed 's/^/     /' "$DIR/config.json"
+  echo
+  echo "   （服务未安装/未改动，凭据已存于 $DIR/.credentials）"
+  exit 1
+fi
+echo "      预检通过"
+
+# 预检通过才写 unit —— 保证 unit 里的凭据必定与运行进程一致
 cat > /etc/systemd/system/$SVC.service <<EOF
 [Unit]
 Description=gemini-web2api-go (Gemini web -> OpenAI API)
@@ -134,50 +178,6 @@ WantedBy=multi-user.target
 EOF
 chmod 600 /etc/systemd/system/$SVC.service
 systemctl daemon-reload
-
-# 重跑时先停旧服务，否则预检必然撞 "address already in use"
-if systemctl list-unit-files "$SVC.service" >/dev/null 2>&1; then
-  systemctl stop $SVC >/dev/null 2>&1 || true
-fi
-# 等端口释放（最多 6 秒）
-i=0
-while [ $i -lt 12 ]; do
-  ss -tlnH "sport = :$PORT" 2>/dev/null | grep -q . || break
-  sleep 0.5; i=$((i+1))
-done
-# 仍被占用 = 别的进程占了，直接报清楚是谁
-if ss -tlnH "sport = :$PORT" 2>/dev/null | grep -q .; then
-  echo "❌ 端口 $PORT 已被占用，占用者："
-  ss -tlnpH "sport = :$PORT" 2>/dev/null | sed 's/^/     /'
-  echo
-  echo "   换端口重跑:  sudo ./install.sh 9000"
-  echo "   或先停掉占用它的进程"
-  exit 1
-fi
-
-# 先前台试跑 4 秒，能提前暴露配置类错误（比如监听地址写法不对）
-echo "      预检启动..."
-PRE=$(cd "$DIR" && timeout 4 sudo -u gemini env ADMIN_TOKEN="$TOK" API_KEY="$APIKEY" \
-      "$DIR/gemini-web2api" --config "$DIR/config.json" --port "$PORT" \
-      --db "$DIR/data/gemini.db" 2>&1 || true)
-if echo "$PRE" | grep -qi "too many colons\|invalid.*address"; then
-  # 极少数环境不吃 [::]，回退成 0.0.0.0（仅 IPv4，但至少能起来）
-  echo "      ⚠️ [::] 不被接受，回退 0.0.0.0（仅 IPv4 监听）"
-  sed -i 's|"host": "\[::\]"|"host": "0.0.0.0"|' "$DIR/config.json"
-  chown gemini:gemini "$DIR/config.json"
-  PRE=$(cd "$DIR" && timeout 4 sudo -u gemini env ADMIN_TOKEN="$TOK" API_KEY="$APIKEY" \
-        "$DIR/gemini-web2api" --config "$DIR/config.json" --port "$PORT" \
-        --db "$DIR/data/gemini.db" 2>&1 || true)
-fi
-if echo "$PRE" | grep -qi "server error\|permission denied\|no such file"; then
-  echo "❌ 预检失败，错误信息："
-  echo "$PRE" | grep -i "error\|denied\|no such" | head -5 | sed 's/^/     /'
-  echo
-  echo "   config.json 内容："
-  sed 's/^/     /' "$DIR/config.json"
-  exit 1
-fi
-
 systemctl enable --now $SVC >/dev/null 2>&1
 
 # 6. 自检
@@ -192,6 +192,14 @@ if ! systemctl is-active --quiet $SVC; then
 fi
 LISTEN=$(ss -tlnH "sport = :$PORT" 2>/dev/null | awk '{print $4}' | head -1)
 HEALTH=$(curl -s --max-time 5 "http://127.0.0.1:$PORT/" || echo FAIL)
+# 实测 API Key 鉴权，确认运行进程与 .credentials 一致
+AUTHTEST=$(curl -s --max-time 8 -o /dev/null -w '%{http_code}' \
+  -H "Authorization: Bearer $APIKEY" "http://127.0.0.1:$PORT/v1/models" || echo 000)
+case "$AUTHTEST" in
+  200) AUTHMSG="✅ 通过" ;;
+  401|403) AUTHMSG="❌ 失败(HTTP $AUTHTEST) — 试 systemctl restart $SVC" ;;
+  *) AUTHMSG="⚠️ 未知(HTTP $AUTHTEST)" ;;
+esac
 V4=$(curl -4 -s --max-time 6 https://api.ipify.org 2>/dev/null || echo "")
 V6=$(curl -6 -s --max-time 6 https://api64.ipify.org 2>/dev/null || echo "")
 
@@ -203,6 +211,7 @@ echo "=============================================================="
 echo "  ✅ 主控机就绪"
 echo "  监听        : ${LISTEN:-未知}   （含 :: 或 * 才表示 v6 可达）"
 echo "  健康检查    : $HEALTH"
+echo "  API Key 鉴权: $AUTHMSG"
 echo "  本机 IPv4   : ${V4:-无}"
 echo "  本机 IPv6   : ${V6:-无}"
 echo "--------------------------------------------------------------"
