@@ -12,7 +12,7 @@
 #
 # 仓库：https://github.com/onshine/ScriptHubs/tree/main/gemini-web2api
 set -e
-SCRIPT_VERSION="R1.3.0"
+SCRIPT_VERSION="R1.3.1"
 DIR="/opt/gemini-web2api"
 
 [ "$(id -u)" = "0" ] || { echo "请用 root 运行"; exit 1; }
@@ -34,6 +34,22 @@ if [ "$1" = "--list" ]; then list_pool; exit 0; fi
 # ── --local：在主控本机装 socks5 并加入池子 ──────────────────
 if [ "$1" = "--local" ]; then
   echo "=== 让主控自己也成为一个出口槽 $SCRIPT_VERSION ==="
+
+# ── 自愈：清掉早期版本(R1.2.0)装坏的 3proxy ──────────────────
+# 它要 glibc>=2.38 而 Debian 12 只有 2.36，dpkg 停在"已解包未配置"，
+# 会卡住后续所有 apt 安装。
+if command -v dpkg >/dev/null 2>&1; then
+  BROKEN=$(dpkg -l 3proxy 2>/dev/null | awk '/^[a-z]{1,2}[A-Z]/{print $2}' | head -1)
+  if [ -n "$BROKEN" ]; then
+    echo "检测到残留的损坏 3proxy，清理中"
+    systemctl disable --now 3proxy >/dev/null 2>&1 || true
+    rm -f /etc/systemd/system/3proxy.service
+    systemctl daemon-reload >/dev/null 2>&1 || true
+    dpkg --purge --force-all 3proxy >/dev/null 2>&1 || true
+    apt-get --fix-broken install -y >/dev/null 2>&1 || true
+    echo "已清理"
+  fi
+fi
   LPORT=1081
   LCFG=/etc/danted-local.conf
   LSVC=danted-local
@@ -44,8 +60,11 @@ if [ "$1" = "--local" ]; then
     echo "[1/3] 安装 dante-server"
     if command -v apt-get >/dev/null 2>&1; then
       apt-get update -qq || true
-      DEBIAN_FRONTEND=noninteractive apt-get install -y dante-server \
-        || { echo "❌ 安装失败，请手动执行：apt install dante-server"; exit 1; }
+      if ! DEBIAN_FRONTEND=noninteractive apt-get install -y dante-server; then
+        echo "❌ 安装失败。若报别的包依赖冲突，先执行："
+        echo "   dpkg --purge --force-all <包名>; apt --fix-broken install -y"
+        exit 1
+      fi
     elif command -v yum >/dev/null 2>&1; then
       yum install -y dante-server || { echo "❌ 安装失败"; exit 1; }
     else

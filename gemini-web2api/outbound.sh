@@ -5,7 +5,7 @@
 #
 # 用 dante-server（Debian/Ubuntu 官方源自带，无 glibc 依赖坑）。
 set -e
-SCRIPT_VERSION="R1.3.0"
+SCRIPT_VERSION="R1.3.1"
 PORT=1080
 CFG=/etc/danted-gw.conf
 SVC=danted-gw
@@ -15,6 +15,22 @@ echo "=== 出口机部署 $SCRIPT_VERSION ==="
 
 command -v curl >/dev/null 2>&1 || { apt-get update && apt-get install -y curl; }
 
+# ── 0. 自愈：清掉早期版本装坏的 3proxy ───────────────────────
+# R1.2.0 曾尝试装官方 3proxy deb，它要 glibc>=2.38 而 Debian 12 只有 2.36，
+# 结果 dpkg 停在"已解包未配置"状态，会卡住后续所有 apt 安装。
+if command -v dpkg >/dev/null 2>&1; then
+  BROKEN=$(dpkg -l 3proxy 2>/dev/null | awk '/^[a-z]{1,2}[A-Z]/{print $2}' | head -1)
+  if [ -n "$BROKEN" ]; then
+    echo "[0/5] 检测到残留的损坏 3proxy，清理中"
+    systemctl disable --now 3proxy >/dev/null 2>&1 || true
+    rm -f /etc/systemd/system/3proxy.service
+    systemctl daemon-reload >/dev/null 2>&1 || true
+    dpkg --purge --force-all 3proxy >/dev/null 2>&1 || true
+    apt-get --fix-broken install -y >/dev/null 2>&1 || true
+    echo "      已清理"
+  fi
+fi
+
 # ── 1. 安装 dante-server ─────────────────────────────────────
 if command -v danted >/dev/null 2>&1 || command -v sockd >/dev/null 2>&1; then
   echo "[1/5] dante 已安装，跳过"
@@ -22,8 +38,14 @@ else
   echo "[1/5] 安装 dante-server"
   if command -v apt-get >/dev/null 2>&1; then
     apt-get update -qq || true
-    DEBIAN_FRONTEND=noninteractive apt-get install -y dante-server \
-      || { echo "❌ 安装失败，请手动执行：apt install dante-server"; exit 1; }
+    if ! DEBIAN_FRONTEND=noninteractive apt-get install -y dante-server; then
+      echo
+      echo "❌ dante-server 安装失败。若上面报的是别的包依赖冲突（unmet dependencies），"
+      echo "   说明 dpkg 里有半装的包卡住了，先执行："
+      echo "     dpkg --purge --force-all <那个包名>; apt --fix-broken install -y"
+      echo "   然后重跑本脚本。"
+      exit 1
+    fi
   elif command -v yum >/dev/null 2>&1; then
     yum install -y dante-server || { echo "❌ 安装失败"; exit 1; }
   else

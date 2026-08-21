@@ -4,7 +4,7 @@
 # 支持：纯 IPv6 / 纯 IPv4 / 双栈 VPS（Debian / Ubuntu / CentOS，systemd）
 # 仓库：https://github.com/onshine/ScriptHubs/tree/main/gemini-web2api
 set -e
-SCRIPT_VERSION="R1.3.0"
+SCRIPT_VERSION="R1.3.1"
 VER="v4.0.0"
 PORT="${1:-8084}"
 DIR="/opt/gemini-web2api"
@@ -13,6 +13,22 @@ SVC="gemini-web2api"
 [ "$(id -u)" = "0" ] || { echo "请用 root 运行"; exit 1; }
 command -v systemctl >/dev/null 2>&1 || { echo "需要 systemd"; exit 1; }
 command -v curl >/dev/null 2>&1 || { apt update -qq && apt install -y -qq curl; }
+# ── 自愈：清掉早期版本(R1.2.0)装坏的 3proxy ──────────────────
+# 它要 glibc>=2.38 而 Debian 12 只有 2.36，dpkg 停在"已解包未配置"，
+# 会卡住后续所有 apt 安装。
+if command -v dpkg >/dev/null 2>&1; then
+  BROKEN=$(dpkg -l 3proxy 2>/dev/null | awk '/^[a-z]{1,2}[A-Z]/{print $2}' | head -1)
+  if [ -n "$BROKEN" ]; then
+    echo "检测到残留的损坏 3proxy，清理中"
+    systemctl disable --now 3proxy >/dev/null 2>&1 || true
+    rm -f /etc/systemd/system/3proxy.service
+    systemctl daemon-reload >/dev/null 2>&1 || true
+    dpkg --purge --force-all 3proxy >/dev/null 2>&1 || true
+    apt-get --fix-broken install -y >/dev/null 2>&1 || true
+    echo "已清理"
+  fi
+fi
+
 echo "=== 主控机部署 $SCRIPT_VERSION (上游 $VER, 端口 $PORT) ==="
 
 # 1. 架构
