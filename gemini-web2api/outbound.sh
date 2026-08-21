@@ -1,115 +1,102 @@
 #!/bin/sh
-# gemini-web2api 出口机脚本 R1.2.0 — 装 socks5，把本机 IPv6 变成出口
+# gemini-web2api 出口机脚本 R1.3.0 — 装 socks5，把本机 IPv6 变成出口
 # 用法：sudo ./outbound.sh
 # 仓库：https://github.com/onshine/ScriptHubs/tree/main/gemini-web2api
+#
+# 用 dante-server（Debian/Ubuntu 官方源自带，无 glibc 依赖坑）。
 set -e
-SCRIPT_VERSION="R1.2.0"
+SCRIPT_VERSION="R1.3.0"
 PORT=1080
-CFG=/etc/3proxy/3proxy.cfg
+CFG=/etc/danted-gw.conf
+SVC=danted-gw
 
 [ "$(id -u)" = "0" ] || { echo "请用 root 运行"; exit 1; }
 echo "=== 出口机部署 $SCRIPT_VERSION ==="
 
 command -v curl >/dev/null 2>&1 || { apt-get update && apt-get install -y curl; }
 
-# ── 1. 安装 3proxy：源装 → 官方 deb/rpm → 源码编译，三级回退 ──
-install_3proxy() {
-  # (a) 系统源（Debian 12+/Ubuntu 22+ 都有；不吞错误，失败就往下走）
-  if command -v apt-get >/dev/null 2>&1; then
-    echo "  尝试 apt 安装..."
-    apt-get update -qq || true
-    if apt-get install -y 3proxy >/dev/null 2>&1; then
-      echo "  ✅ apt 安装成功"; return 0
-    fi
-    echo "  apt 源里没有，改用官方 deb"
-  fi
-
-  # (b) 官方 Release deb/rpm —— 注意资产名用 x86_64/arm64，且版本要存在
-  M=$(uname -m)
-  case "$M" in
-    x86_64)  ASSET_ARCH=x86_64 ;;
-    aarch64) ASSET_ARCH=arm64  ;;
-    armv7l|armv6l) ASSET_ARCH=arm ;;
-    *) ASSET_ARCH="" ;;
-  esac
-  if [ -n "$ASSET_ARCH" ]; then
-    # 动态取最新 tag，避免写死版本号将来 404
-    TAG=$(curl -fsSL https://api.github.com/repos/3proxy/3proxy/releases/latest 2>/dev/null \
-          | sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p' | head -1)
-    [ -n "$TAG" ] || TAG=0.9.9
-    if command -v dpkg >/dev/null 2>&1; then
-      URL="https://github.com/3proxy/3proxy/releases/download/$TAG/3proxy-$TAG.$ASSET_ARCH.deb"
-      echo "  下载 $URL"
-      if curl -fsSL -o /tmp/3proxy.pkg "$URL"; then
-        apt-get install -y /tmp/3proxy.pkg >/dev/null 2>&1 || dpkg -i /tmp/3proxy.pkg || true
-        command -v 3proxy >/dev/null 2>&1 && { echo "  ✅ deb 安装成功"; return 0; }
-      fi
-    elif command -v rpm >/dev/null 2>&1; then
-      URL="https://github.com/3proxy/3proxy/releases/download/$TAG/3proxy-$TAG.$ASSET_ARCH.rpm"
-      curl -fsSL -o /tmp/3proxy.pkg "$URL" && rpm -i /tmp/3proxy.pkg 2>/dev/null || true
-      command -v 3proxy >/dev/null 2>&1 && { echo "  ✅ rpm 安装成功"; return 0; }
-    fi
-    echo "  官方包不可用，改为源码编译"
-  fi
-
-  # (c) 源码编译（最后兜底，纯 v6 机也能过，只依赖 gcc+make）
-  echo "  编译安装 3proxy $TAG"
-  if command -v apt-get >/dev/null 2>&1; then
-    apt-get install -y build-essential >/dev/null 2>&1 || apt-get install -y gcc make libc6-dev >/dev/null 2>&1
-  else
-    yum groupinstall -y "Development Tools" >/dev/null 2>&1 || yum install -y gcc make >/dev/null 2>&1
-  fi
-  curl -fsSL -o /tmp/3proxy.tar.gz "https://github.com/3proxy/3proxy/archive/refs/tags/$TAG.tar.gz" || return 1
-  rm -rf /tmp/3proxy-src && mkdir -p /tmp/3proxy-src
-  tar xzf /tmp/3proxy.tar.gz -C /tmp/3proxy-src --strip-components=1 || return 1
-  ( cd /tmp/3proxy-src && make -f Makefile.Linux >/dev/null 2>&1 && \
-    { install -m755 bin/3proxy /usr/local/bin/3proxy 2>/dev/null || \
-      install -m755 src/3proxy /usr/local/bin/3proxy; } ) || return 1
-  command -v 3proxy >/dev/null 2>&1
-}
-
-if command -v 3proxy >/dev/null 2>&1; then
-  echo "[1/4] 3proxy 已安装，跳过"
+# ── 1. 安装 dante-server ─────────────────────────────────────
+if command -v danted >/dev/null 2>&1 || command -v sockd >/dev/null 2>&1; then
+  echo "[1/5] dante 已安装，跳过"
 else
-  echo "[1/4] 安装 3proxy"
-  install_3proxy || { echo "❌ 3proxy 安装失败，请手动 apt install 3proxy 后重跑"; exit 1; }
+  echo "[1/5] 安装 dante-server"
+  if command -v apt-get >/dev/null 2>&1; then
+    apt-get update -qq || true
+    DEBIAN_FRONTEND=noninteractive apt-get install -y dante-server \
+      || { echo "❌ 安装失败，请手动执行：apt install dante-server"; exit 1; }
+  elif command -v yum >/dev/null 2>&1; then
+    yum install -y dante-server || { echo "❌ 安装失败"; exit 1; }
+  else
+    echo "❌ 不支持的发行版，请手动安装 dante-server"; exit 1
+  fi
 fi
-BIN=$(command -v 3proxy)
+BIN=$(command -v danted || command -v sockd)
+[ -n "$BIN" ] || { echo "❌ 找不到 danted 可执行文件"; exit 1; }
+# Debian 装完自带一个默认 danted 服务，其默认配置会启动失败，先停掉避免干扰
+systemctl disable --now danted >/dev/null 2>&1 || true
 echo "      使用 $BIN"
 
-# ── 2. 账号密码（随机，防止变成公共代理）──────────────────────
-echo "[2/4] 生成代理账号"
+# ── 2. 探测网卡 ──────────────────────────────────────────────
+echo "[2/5] 探测网络"
+IFACE=$(ip -o -6 route show default 2>/dev/null | awk '{print $5}' | head -1)
+[ -n "$IFACE" ] || IFACE=$(ip -o -4 route show default 2>/dev/null | awk '{print $5}' | head -1)
+[ -n "$IFACE" ] || IFACE=$(ip -o link show 2>/dev/null | awk -F': ' '$2!="lo"{print $2; exit}')
+[ -n "$IFACE" ] || { echo "❌ 找不到网卡"; exit 1; }
+NV6=$(ip -6 addr show scope global 2>/dev/null | grep -c inet6 || true)
+echo "      网卡 $IFACE，全局 IPv6 地址 ${NV6:-0} 个"
+
+# ── 3. 账号密码（随机，防止变成公共代理）──────────────────────
+echo "[3/5] 生成代理账号"
 gen() { tr -dc 'a-z0-9' < /dev/urandom | head -c "${1:-16}"; }
 USER="gw$(gen 6)"
 PASS=$(gen 20)
+# dante 用系统用户认证：建一个不能登录 shell 的专用用户
+id "$USER" >/dev/null 2>&1 || useradd -r -M -s /usr/sbin/nologin "$USER"
+echo "$USER:$PASS" | chpasswd
 
-# ── 3. 配置：监听双栈，出站强制 IPv6 ─────────────────────────
-echo "[3/4] 写配置"
-mkdir -p /etc/3proxy
+# ── 4. 配置 ──────────────────────────────────────────────────
+echo "[4/5] 写配置"
+# external 写网卡名 → dante 按目标地址族自动选源地址：
+# 目标是 v6 就从本机 v6 出，这正是要的「IPv6 出口」。
 cat > "$CFG" <<EOF
 # gemini-web2api 出口 $SCRIPT_VERSION
-nserver 2606:4700:4700::1111
-nserver 2001:4860:4860::8888
-nserver 1.1.1.1
-nscache 65536
-timeouts 1 5 30 60 180 1800 15 60
-users $USER:CL:$PASS
-auth strong
-allow $USER
-# -6 = 出站强制走 IPv6（"IPv6 出口"的关键）
-socks -p$PORT -6
+logoutput: syslog
+internal: 0.0.0.0 port = $PORT
+internal: :: port = $PORT
+external: $IFACE
+socksmethod: username
+user.privileged: root
+user.unprivileged: nobody
+client pass {
+    from: 0.0.0.0/0 to: 0.0.0.0/0
+    log: error
+}
+client pass {
+    from: ::/0 to: ::/0
+    log: error
+}
+socks pass {
+    from: 0.0.0.0/0 to: 0.0.0.0/0
+    socksmethod: username
+    log: error
+}
+socks pass {
+    from: ::/0 to: ::/0
+    socksmethod: username
+    log: error
+}
 EOF
-chmod 600 "$CFG"
+chmod 644 "$CFG"
 
-cat > /etc/systemd/system/3proxy.service <<EOF
+cat > /etc/systemd/system/$SVC.service <<EOF
 [Unit]
-Description=3proxy socks5 (gemini-web2api outbound)
+Description=Dante socks5 (gemini-web2api outbound)
 After=network-online.target
 Wants=network-online.target
 
 [Service]
 Type=simple
-ExecStart=$BIN $CFG
+ExecStart=$BIN -f $CFG -N 1
 Restart=on-failure
 RestartSec=5
 LimitNOFILE=65535
@@ -119,18 +106,20 @@ WantedBy=multi-user.target
 EOF
 
 systemctl daemon-reload
-systemctl enable 3proxy >/dev/null 2>&1
-systemctl restart 3proxy
+systemctl enable $SVC >/dev/null 2>&1
+systemctl restart $SVC
 sleep 2
 
-# ── 4. 自检 ──────────────────────────────────────────────────
-echo "[4/4] 自检"
-if ! systemctl is-active --quiet 3proxy; then
+# ── 5. 自检 ──────────────────────────────────────────────────
+echo "[5/5] 自检"
+if ! systemctl is-active --quiet $SVC; then
   echo "❌ 启动失败，最近日志："
-  journalctl -u 3proxy -n 20 --no-pager 2>/dev/null || true
+  journalctl -u $SVC -n 25 --no-pager 2>/dev/null || true
+  echo
+  echo "手动排查：$BIN -f $CFG -d"
   exit 1
 fi
-ss -tlnH "sport = :$PORT" 2>/dev/null | head -2 | sed 's/^/      监听: /'
+ss -tlnH "sport = :$PORT" 2>/dev/null | awk '{print "      监听: "$4}' | sort -u
 
 V6=$(curl -6 -s --max-time 8 https://api64.ipify.org 2>/dev/null || echo "")
 V4=$(curl -4 -s --max-time 8 https://api.ipify.org 2>/dev/null || echo "")
@@ -140,14 +129,13 @@ OUT=$(curl -s --max-time 15 --proxy "socks5h://$USER:$PASS@127.0.0.1:$PORT" \
 echo
 echo "=============================================================="
 if [ -n "$OUT" ]; then
-  echo "  ✅ 出口机就绪（代理实测可用）"
+  echo "  ✅ 出口机就绪（代理实测可用，出口 IP: $OUT）"
 else
-  echo "  ⚠️ 服务已启动，但本机代理自测未通（可能是出站 v6 不可用）"
-  echo "     排查：curl -6 https://api64.ipify.org  能否返回地址"
+  echo "  ⚠️ 服务已启动，但本机代理自测未通"
+  echo "     排查: journalctl -u $SVC -n 30"
 fi
 echo "  本机 IPv6   : ${V6:-无}"
 echo "  本机 IPv4   : ${V4:-无（纯 v6 机）}"
-echo "  代理出口 IP : ${OUT:-未探测到}"
 echo "--------------------------------------------------------------"
 echo "  复制下面这一整行，拿到主控机用："
 echo
@@ -157,5 +145,6 @@ else
   echo "  socks5h://$USER:$PASS@$V4:$PORT"
 fi
 echo
-echo "  ⚠️ 密码只显示这一次。忘了就看：cat $CFG"
+echo "  ⚠️ 密码只显示这一次，请立刻复制保存"
+echo "  服务管理: systemctl status $SVC"
 echo "=============================================================="

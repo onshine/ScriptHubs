@@ -129,19 +129,30 @@ https://raw.githubusercontent.com/onshine/ScriptHubs/main/gemini-web2api/Gemini_
 ```bash
 systemctl status gemini-web2api        # 主控状态
 journalctl -u gemini-web2api -f        # 主控日志
-systemctl status 3proxy                # 出口机状态
-systemctl status 3proxy-local          # 主控本机出口槽（--local 装的）
-cat /etc/3proxy/3proxy.cfg             # 忘了代理密码就看这里
+systemctl status danted-gw             # 出口机状态
+systemctl status danted-local          # 主控本机出口槽（--local 装的）
+# 忘了代理密码：只能重跑 outbound.sh 生成新的（密码是系统用户密码，不落盘明文）
 ```
 
-## 装不上 3proxy 怎么办
+## 装不上 socks5 怎么办
 
-脚本已内置三级回退（系统源 → 官方 deb/rpm → 源码编译），正常都能过。若仍失败：
+出口用的是 **dante-server**（Debian / Ubuntu 官方源自带）。若安装失败：
 
 ```bash
-apt update && apt install -y 3proxy    # 手动装
-./outbound.sh                          # 再跑一次，会自动跳过安装步骤
+apt update && apt install -y dante-server
+./outbound.sh              # 再跑一次，会自动跳过安装步骤
 ```
+
+**如果之前跑过 R1.2.0 装坏了 3proxy**（报 `GLIBC_2.38 not found`），先清掉：
+
+```bash
+systemctl disable --now 3proxy 2>/dev/null
+rm -f /etc/systemd/system/3proxy.service
+dpkg --remove --force-remove-reinstreq 3proxy 2>/dev/null
+systemctl daemon-reload
+```
+
+然后重跑 `outbound.sh` 即可。
 
 ---
 
@@ -171,6 +182,7 @@ A：不会。上游只存元数据（模型、延迟、token 数、状态码）�
 
 | 版本 | 变更 |
 |---|---|
+| R1.3.0 | **改用 dante-server 替代 3proxy**。根因：3proxy 不在 Debian 12 官方源里，而官方 0.9.9 deb 要求 glibc ≥ 2.38，Debian 12 只有 2.36 → 装上也跑不起来（`GLIBC_2.38 not found`）；且 dpkg 解包后 `command -v` 能找到文件，导致脚本误判成功。dante-server 在 Debian/Ubuntu 官方源自带，无依赖坑。服务名 `danted-gw`(1080) / `danted-local`(1081)，配置独立不冲突；自动停用 Debian 自带的空配置 danted 服务 |
 | R1.2.0 | 修复 3proxy 安装 404（官方 deb 资产名是 `x86_64`/`arm64` 而非 dpkg 的 `amd64`，且写死的 0.9.4 已下架）。改为三级回退：系统源 → 官方 deb/rpm（版本动态取 latest tag）→ 源码编译；不再用 `-qq` 吞掉错误，失败时打印 journalctl 日志；`--local` 改用独立配置与服务名 `3proxy-local`(1081)，避免与出口机的 3proxy(1080) 互相覆盖 |
 | R1.1.0 | 拆成三个脚本（主控 / 出口 / 加代理）；出口机改用 3proxy 无交互部署 + 出站强制 v6；addproxy.sh 支持 `--local` 补上主控 IP 闲置问题、自动测试代理连通性、自动读取凭据；主控支持纯 v4 / 纯 v6 / 双栈自适应；README 精简为三步 |
 | R1.0.0 | 首发。单脚本部署 + 多节点巡检插件 |
