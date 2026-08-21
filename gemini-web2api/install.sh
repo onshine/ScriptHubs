@@ -4,7 +4,7 @@
 # 支持：纯 IPv6 / 纯 IPv4 / 双栈 VPS（Debian / Ubuntu / CentOS，systemd）
 # 仓库：https://github.com/onshine/ScriptHubs/tree/main/gemini-web2api
 set -e
-SCRIPT_VERSION="R1.1.0"
+SCRIPT_VERSION="R1.2.0"
 VER="v4.0.0"
 PORT="${1:-8084}"
 DIR="/opt/gemini-web2api"

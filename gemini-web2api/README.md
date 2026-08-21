@@ -4,7 +4,7 @@
 一台做主控，其他小鸡做 IPv6 出口，配额叠加。
 
 - 上游项目：[zexadev/gemini-web2api-go](https://github.com/zexadev/gemini-web2api-go) v4.0.0
-- 本套件版本：**R1.1.0**
+- 本套件版本：**R1.2.0**
 
 ---
 
@@ -130,7 +130,17 @@ https://raw.githubusercontent.com/onshine/ScriptHubs/main/gemini-web2api/Gemini_
 systemctl status gemini-web2api        # 主控状态
 journalctl -u gemini-web2api -f        # 主控日志
 systemctl status 3proxy                # 出口机状态
+systemctl status 3proxy-local          # 主控本机出口槽（--local 装的）
 cat /etc/3proxy/3proxy.cfg             # 忘了代理密码就看这里
+```
+
+## 装不上 3proxy 怎么办
+
+脚本已内置三级回退（系统源 → 官方 deb/rpm → 源码编译），正常都能过。若仍失败：
+
+```bash
+apt update && apt install -y 3proxy    # 手动装
+./outbound.sh                          # 再跑一次，会自动跳过安装步骤
 ```
 
 ---
@@ -161,6 +171,7 @@ A：不会。上游只存元数据（模型、延迟、token 数、状态码）�
 
 | 版本 | 变更 |
 |---|---|
+| R1.2.0 | 修复 3proxy 安装 404（官方 deb 资产名是 `x86_64`/`arm64` 而非 dpkg 的 `amd64`，且写死的 0.9.4 已下架）。改为三级回退：系统源 → 官方 deb/rpm（版本动态取 latest tag）→ 源码编译；不再用 `-qq` 吞掉错误，失败时打印 journalctl 日志；`--local` 改用独立配置与服务名 `3proxy-local`(1081)，避免与出口机的 3proxy(1080) 互相覆盖 |
 | R1.1.0 | 拆成三个脚本（主控 / 出口 / 加代理）；出口机改用 3proxy 无交互部署 + 出站强制 v6；addproxy.sh 支持 `--local` 补上主控 IP 闲置问题、自动测试代理连通性、自动读取凭据；主控支持纯 v4 / 纯 v6 / 双栈自适应；README 精简为三步 |
 | R1.0.0 | 首发。单脚本部署 + 多节点巡检插件 |
 

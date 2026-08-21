@@ -12,7 +12,7 @@
 #
 # 仓库：https://github.com/onshine/ScriptHubs/tree/main/gemini-web2api
 set -e
-SCRIPT_VERSION="R1.1.0"
+SCRIPT_VERSION="R1.2.0"
 DIR="/opt/gemini-web2api"
 
 [ "$(id -u)" = "0" ] || { echo "请用 root 运行"; exit 1; }
@@ -36,22 +36,41 @@ if [ "$1" = "--local" ]; then
   echo "=== 让主控自己也成为一个出口槽 $SCRIPT_VERSION ==="
   if ! command -v 3proxy >/dev/null 2>&1; then
     echo "[1/3] 安装 3proxy"
-    if command -v apt >/dev/null 2>&1; then
-      apt update -qq && DEBIAN_FRONTEND=noninteractive apt install -y -qq 3proxy >/dev/null 2>&1 || {
-        ARCH=$(dpkg --print-architecture)
-        curl -fsSL -o /tmp/3proxy.deb "https://github.com/3proxy/3proxy/releases/download/0.9.4/3proxy-0.9.4.${ARCH}.deb"
-        dpkg -i /tmp/3proxy.deb >/dev/null 2>&1
-      }
-    else
-      yum install -y -q 3proxy >/dev/null 2>&1
+    OK=0
+    # (a) 系统源
+    if command -v apt-get >/dev/null 2>&1; then
+      apt-get update -qq || true
+      apt-get install -y 3proxy >/dev/null 2>&1 && OK=1
+    elif command -v yum >/dev/null 2>&1; then
+      yum install -y -q 3proxy >/dev/null 2>&1 && OK=1
     fi
+    # (b) 官方 Release（资产名用 x86_64/arm64，版本动态取，避免写死后 404）
+    if [ "$OK" = "0" ]; then
+      case "$(uname -m)" in
+        x86_64)  AA=x86_64 ;;
+        aarch64) AA=arm64  ;;
+        armv7l|armv6l) AA=arm ;;
+        *) AA="" ;;
+      esac
+      TAG=$(curl -fsSL https://api.github.com/repos/3proxy/3proxy/releases/latest 2>/dev/null \
+            | sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p' | head -1)
+      [ -n "$TAG" ] || TAG=0.9.9
+      if [ -n "$AA" ] && command -v dpkg >/dev/null 2>&1; then
+        curl -fsSL -o /tmp/3proxy.deb \
+          "https://github.com/3proxy/3proxy/releases/download/$TAG/3proxy-$TAG.$AA.deb" \
+          && { apt-get install -y /tmp/3proxy.deb >/dev/null 2>&1 || dpkg -i /tmp/3proxy.deb >/dev/null 2>&1; }
+        command -v 3proxy >/dev/null 2>&1 && OK=1
+      fi
+    fi
+    [ "$OK" = "1" ] || { echo "❌ 3proxy 安装失败，请先手动 apt install 3proxy"; exit 1; }
   fi
-  command -v 3proxy >/dev/null 2>&1 || { echo "3proxy 安装失败"; exit 1; }
 
   gen() { tr -dc 'a-z0-9' < /dev/urandom | head -c "${1:-16}"; }
-  LU="loc$(gen 6)"; LP=$(gen 20); LPORT=1080
+  LU="loc$(gen 6)"; LP=$(gen 20); LPORT=1081
+  # 用独立配置和独立服务名，避免和 outbound.sh 装的 3proxy(1080) 互相覆盖
+  # ——同一台机既当主控又当出口时也能共存
   mkdir -p /etc/3proxy
-  cat > /etc/3proxy/3proxy.cfg <<EOF
+  cat > /etc/3proxy/3proxy-local.cfg <<EOF
 nserver 2606:4700:4700::1111
 nserver 1.1.1.1
 nscache 65536
@@ -62,22 +81,28 @@ allow $LU
 # 只听 127.0.0.1，外部进不来；不加 -6，走本机默认出口
 socks -p$LPORT -i127.0.0.1
 EOF
-  chmod 600 /etc/3proxy/3proxy.cfg
-  cat > /etc/systemd/system/3proxy.service <<EOF
+  chmod 600 /etc/3proxy/3proxy-local.cfg
+  cat > /etc/systemd/system/3proxy-local.service <<EOF
 [Unit]
-Description=3proxy socks5 (local outbound slot)
+Description=3proxy socks5 (local outbound slot for gemini-web2api)
 After=network-online.target
 [Service]
-ExecStart=$(command -v 3proxy) /etc/3proxy/3proxy.cfg
+ExecStart=$(command -v 3proxy) /etc/3proxy/3proxy-local.cfg
 Restart=on-failure
 RestartSec=5
 [Install]
 WantedBy=multi-user.target
 EOF
-  echo "[2/3] 启动本地 socks5"
-  systemctl daemon-reload && systemctl enable --now 3proxy >/dev/null 2>&1
+  echo "[2/3] 启动本地 socks5 (127.0.0.1:$LPORT)"
+  systemctl daemon-reload
+  systemctl enable 3proxy-local >/dev/null 2>&1
+  systemctl restart 3proxy-local
   sleep 2
-  systemctl is-active --quiet 3proxy || { echo "3proxy 启动失败"; exit 1; }
+  if ! systemctl is-active --quiet 3proxy-local; then
+    echo "❌ 启动失败，日志："
+    journalctl -u 3proxy-local -n 20 --no-pager 2>/dev/null || true
+    exit 1
+  fi
   URL="socks5h://$LU:$LP@127.0.0.1:$LPORT"
   NAME="本机出口"
   echo "[3/3] 加入代理池"
