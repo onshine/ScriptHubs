@@ -1,82 +1,67 @@
 # gemini-web2api — 小鸡部署套件
 
 把 Google Gemini **网页端**反代成 **OpenAI 兼容 API**（不用 Google API Key、不用付费配额）。
-一台做主控，其他小鸡做 IPv6 出口，配额叠加。
+一台做主控，其他小鸡做出口，配额叠加。
 
 - 上游项目：[zexadev/gemini-web2api-go](https://github.com/zexadev/gemini-web2api-go) v4.0.0
-- 本套件版本：**R1.2.0**
+- 本套件版本：**R1.6.0**
 
 ---
 
-## 就三步
-
-```
-① 出口机（每台 IPv6 小鸡）跑 outbound.sh  → 复制它给出的 socks5 地址
-② 主控机跑 install.sh                     → 拿到 API Key
-③ 主控机跑 addproxy.sh 把①的地址加进去    → 完成
-```
-
-主控机可以是 **IPv4 机、IPv6 机、双栈机**都行。
-
----
-
-### ① 出口机（每台 IPv6 小鸡都跑一遍）
+## 一条命令搞定
 
 ```bash
-curl -fL -o outbound.sh https://raw.githubusercontent.com/onshine/ScriptHubs/main/gemini-web2api/outbound.sh
-chmod +x outbound.sh && sudo ./outbound.sh
+curl -fsSL https://raw.githubusercontent.com/onshine/ScriptHubs/main/gemini-web2api/gw.sh -o gw.sh && chmod +x gw.sh && sudo ./gw.sh
 ```
 
-跑完会打印一行，**复制下来**：
+会出来一个菜单，选数字即可。**它每次运行都自动拉取最新子脚本**，不用你手动
+下载、不受 raw CDN 缓存影响：
 
 ```
-socks5h://gwab12cd:xxxxxxxx@[2001:db8::2]:1080
+╔══════════════════════════════════════════╗
+║   gemini-web2api 管理面板  R1.6.0        ║
+╚══════════════════════════════════════════╝
+  1) 部署主控（提供 OpenAI 兼容 API）
+  2) 把本机做成出口（装 socks5）
+  3) 加一个出口到代理池
+  4) 让主控自己也成为出口槽
+  5) 代理池体检
+  6) 一键修复（禁用被封的代理）
+  7) 状态总览
+  8) 卸载
+  0) 退出
 ```
 
-> 账号密码随机生成（防止变成公共代理被人蹭）。出站强制走 IPv6。
-
-### ② 主控机
+也支持免交互调用：
 
 ```bash
-curl -fL -o install.sh https://raw.githubusercontent.com/onshine/ScriptHubs/main/gemini-web2api/install.sh
-chmod +x install.sh && sudo ./install.sh
+sudo ./gw.sh master                    # 部署主控
+sudo ./gw.sh outbound                  # 把本机做成出口
+sudo ./gw.sh addproxy 'socks5h://...'  # 加出口
+sudo ./gw.sh local                     # 主控自己也当出口槽
+sudo ./gw.sh check                     # 代理池体检
+sudo ./gw.sh fix                       # 禁用被封的代理
+sudo ./gw.sh status                    # 状态总览
+sudo ./gw.sh uninstall                 # 卸载
 ```
 
-> **拉到的是旧版？** `raw.githubusercontent.com` 有约 5 分钟 CDN 缓存。
-> 脚本第一行会打印版本号，与本文档顶部的版本不一致就是拿到缓存了，
-> 用这个地址强制取最新：
-> ```bash
-> curl -fL -o install.sh "https://raw.githubusercontent.com/onshine/ScriptHubs/main/gemini-web2api/install.sh?$(date +%s)"
-> ```
+### 典型流程
 
-跑完打印 **Admin Token** 和 **API Key**，保存好。默认端口 8084，要改就 `sudo ./install.sh 9000`。
-
-> 重跑脚本是安全的：会自动停旧服务、复用已有凭据（客户端不用改配置）。
-> **想彻底重装换新凭据**：`sudo ./install.sh --regen`。
-> 忘了凭据看 `cat /opt/gemini-web2api/.credentials`。
->
-> 凭据文件丢了也不怕，它们在 systemd 单元里，可这样恢复：
-> ```bash
-> sed -n 's/^Environment=//p' /etc/systemd/system/gemini-web2api.service
-> ```
-
-### ③ 主控机加出口
-
+**只用一台机**（最简单，个人够用）：
 ```bash
-curl -fL -o addproxy.sh https://raw.githubusercontent.com/onshine/ScriptHubs/main/gemini-web2api/addproxy.sh
-chmod +x addproxy.sh
-
-# 把 ① 复制的地址粘进来（有几台出口机就加几次）
-sudo ./addproxy.sh 'socks5h://gwab12cd:xxxxxxxx@[2001:db8::2]:1080' 'B机'
-sudo ./addproxy.sh 'socks5h://gwef34gh:yyyyyyyy@[2001:db8::3]:1080' 'C机'
-
-# 让主控自己的 IP 也干活（见下方说明，建议加）
-sudo ./addproxy.sh --local
-
-sudo ./addproxy.sh --list      # 看池子
+sudo ./gw.sh master        # 装完就能用，走本机 IP 直连
 ```
 
-加之前会自动测一次通不通，并显示出口 IP。凭据自动从 `install.sh` 存的文件读，不用手输。
+**一主控 + 多出口**（需要更多配额时）：
+```bash
+# ① 每台出口机上
+sudo ./gw.sh outbound      # 输出一行 socks5h://...
+
+# ② 主控机上，把①的输出粘进来
+sudo ./gw.sh addproxy 'socks5h://用户:密码@IP:1080'
+sudo ./gw.sh local         # 别忘这步，否则主控 IP 闲置
+sudo ./gw.sh check         # 确认都健康
+```
 
 ---
 
@@ -221,6 +206,7 @@ A：不会。上游只存元数据（模型、延迟、token 数、状态码）�
 
 | 版本 | 变更 |
 |---|---|
+| R1.6.0 | **新增统一入口 `gw.sh`**。此前需要用户对四个子脚本分别手动 `curl` + `chmod`，极易因 raw CDN 缓存跑到旧版、或因粘贴时输出冲掉 `chmod` 而报 `command not found`。现在只需记一条命令，菜单选数字；每次运行自动带时间戳拉取最新子脚本并打印其版本号。附带 `status` 状态总览（服务/监听/健康/API Key/代理池数量一屏看完）与 `uninstall` 完整卸载 |
 | R1.5.0 | **出口改为默认优先 IPv4**。实测：Google 对机房 IPv6 段封锁远严于 IPv4，v6 出口普遍 302→`/sorry/` 或 `BardErrorInfo[1060]`（连上但拒绝生成）。另修 microsocks 致命行为：未设 `-b` 时 `addr_choose` 直接取 `getaddrinfo` 首项，glibc 双栈默认 v6 在前 → **无条件走 v6 且不回退 v4**，v6 不通即 `network unreachable`。现在部署时对 v4/v6 分别实测 Google 可达性，选可用的那个并显式 `-b` 绑定；`--force-v6` 可强制走 v6。四个脚本均内置 `RAWBASE`，报错时提示强制取新版命令 |
 | R1.4.2 | **修复 302 被误判为可用**。Google 对风控 IP 返回 302 → `/sorry/`（验证码页），原脚本把 3xx 都当"可连通"，导致被风控的代理留在池子里，请求轮到就失败 → 客户端报「重试次数已用尽」。现改为检查响应头 `Location`，命中 `sorry/captcha` 即判定 🚫 已风控并支持 `--disable` 自动禁用；`addproxy.sh` 加代理时同样拦截 |
 | R1.4.1 | **修复强制绑定 IPv6 导致出口断网**：原先"有 v6 就绑"，但 microsocks 的 `-b` 会让它优先选与绑定地址同族的目标（`sockssrv.c` 的 `addr_choose`），若该 v6 到 Google 不通就彻底连不上。改为先实测 `curl -6 gemini.google.com` 可达才绑定，否则交由系统按 RFC 6724 自动选路（本来就优先 v6）；需强制绑定可加 `--force-v6`。`addproxy.sh` 加代理前除测出口 IP 外，**新增实测能否连通 gemini.google.com**，不通时明确警告（代理池非空时上游不回退直连，一个坏代理会拖垮整个服务）。**新增 `checkproxy.sh`** 批量体检代理池，`--disable` 自动禁用坏代理 |
