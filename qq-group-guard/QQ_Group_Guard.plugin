@@ -1,0 +1,34 @@
+#!name=QQ群名片守卫
+#!desc=定时巡检 QQ 群成员名片（OneBot v11 / go-cqhttp / NapCat / Lagrange HTTP API）。名片不含约定关键词的成员按「宽容模式」分级处理：观察期内只在群里 @ 提醒改名，连续多轮仍不合规才踢出。内置全角/大小写/符号模糊匹配、管理员与新人豁免、白名单、单轮上限、比例熔断，防误伤防清群。首次使用请先用 report 模式跑几天。
+#!author=Minis
+#!homepage=https://github.com/onshine/ScriptHubs/tree/main/qq-group-guard
+#!icon=https://raw.githubusercontent.com/58xinian/icon/master/QQ.png
+#!loon_version=3.2.1(734)
+
+[Argument]
+api_base = input,"http://127.0.0.1:5700",tag=OneBot HTTP 地址,desc=必填。go-cqhttp / NapCat / Lagrange 的 HTTP 服务地址，必须以 http:// 或 https:// 开头。Loon 需能访问到该地址（内网请确保同一网络或已配置分流）
+token = input,"",tag=access_token,desc=OneBot 配置里的 access_token，未设置则留空
+group_id = input,"",tag=群号,desc=必填。要巡检的群号，多个用英文逗号分隔，如 123456789,987654321
+keywords = input,"",tag=合规关键词,desc=必填。名片含任一关键词即视为合规，逗号分隔，如 深圳,SZ。支持 re: 前缀写正则，如 re:^\d{4}-.+。留空时脚本拒绝运行（防清群事故）
+mode = select,"report","lenient","strict",tag=运行模式,desc=report=只报告绝不动手（首次部署强烈建议先跑几天）；lenient=宽容模式，观察期+多轮确认后才踢；strict=发现即踢
+grace_hours = input,"48",tag=观察期小时数,desc=宽容模式下给成员的改名宽限时间，从第一次被发现算起，默认 48 小时
+grace_rounds = input,"2",tag=连续命中轮数,desc=宽容模式下要连续几次巡检都不合规才踢，默认 2 轮。与观察期小时数需同时满足
+new_member_days = input,"3",tag=新人保护天数,desc=入群不足这么多天的成员一律豁免，给新人反应时间。0 表示关闭
+veteran_days = input,"0",tag=老成员保护天数,desc=入群超过这么多天的老人一律豁免。0 表示关闭（默认不启用）
+whitelist = input,"",tag=白名单QQ号,desc=永不处理的 QQ 号，逗号分隔。管理员、机器人、重要成员建议加进来
+self_qq = input,"0",tag=机器人自身QQ,desc=填机器人自己的 QQ 号防止自踢，0 表示不设置
+skip_admin = select,"true","false",tag=豁免群主管理员,desc=默认 true。设为 false 会连管理员一起处理，非常危险
+skip_title = select,"true","false",tag=豁免有头衔者,desc=默认 true，拥有群专属头衔的成员视为老人，跳过检查
+max_kick = input,"5",tag=单轮最多踢几人,desc=每次巡检最多踢这么多人，超出的排到下轮，防止一次性大批量操作触发风控。0 表示不限
+max_ratio = input,"30",tag=比例熔断阈值,desc=当不合规人数占全群比例超过此百分比时，判定为关键词配错，中止全部踢人操作。0 表示关闭
+breaker_min = input,"5",tag=熔断最少人数,desc=熔断需同时满足「比例超阈值」且「不合规人数不少于此值」，避免小群 3/10 就误触发
+interval = input,"1.5",tag=踢人间隔秒数,desc=连续踢人的间隔，默认 1.5 秒，太快容易触发腾讯风控
+reject_add = select,"false","true",tag=拒绝再次加群,desc=true 时踢出同时拉黑，该成员无法再申请加群。默认 false
+warn_in_group = select,"true","false",tag=群内@提醒,desc=true 时会在观察期于群内 @ 相关成员提醒改名（每轮最多 @ 10 人）。默认 true
+warn_template = input,"请在 {hours} 小时内把群名片改成含「{keywords}」的格式，否则将被移出本群。",tag=提醒话术,desc=支持占位符 {hours} 观察期小时数 / {rounds} 轮数 / {keywords} 关键词列表
+notify_ok = select,"false","true",tag=无事也通知,desc=默认仅在有动作或异常时推送；true 则每次巡检都推送结果
+timeout = input,"20",tag=请求超时秒数,desc=单次 HTTP 请求超时，默认 20 秒
+cron = input,"0 */6 * * *",tag=巡检周期,desc=cron 表达式，默认每 6 小时巡检一次。群大人多建议放宽到 0 */12 * * *
+
+[Script]
+cron {cron} script-path=https://raw.githubusercontent.com/onshine/ScriptHubs/main/qq-group-guard/qq-group-guard.js, timeout=300, argument=[{"api_base":"{api_base}","token":"{token}","group_id":"{group_id}","keywords":"{keywords}","mode":"{mode}","grace_hours":"{grace_hours}","grace_rounds":"{grace_rounds}","new_member_days":"{new_member_days}","veteran_days":"{veteran_days}","whitelist":"{whitelist}","self_qq":"{self_qq}","skip_admin":"{skip_admin}","skip_title":"{skip_title}","max_kick":"{max_kick}","max_ratio":"{max_ratio}","breaker_min":"{breaker_min}","interval":"{interval}","reject_add":"{reject_add}","warn_in_group":"{warn_in_group}","warn_template":"{warn_template}","notify_ok":"{notify_ok}","timeout":"{timeout}"}], tag=QQ群名片守卫
