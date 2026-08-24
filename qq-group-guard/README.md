@@ -1,6 +1,6 @@
 # QQ 群名片守卫 · qq-group-guard
 
-**版本：R1.0.0**
+**版本：R1.0.1**
 
 定时巡检 QQ 群成员名片，对不符合群规格式的成员按「**宽容模式**」分级处理：观察期内只在群里 @ 提醒改名，连续多轮仍不改才踢出。
 
@@ -116,7 +116,7 @@ https://raw.githubusercontent.com/onshine/ScriptHubs/main/qq-group-guard/QQ_Grou
 ### 一键安装
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/onshine/ScriptHubs/main/qq-group-guard/install.sh | sh
+sh -c "$(curl -fsSL https://raw.githubusercontent.com/onshine/ScriptHubs/main/qq-group-guard/install.sh)"
 ```
 
 不带参数运行会进入**管理菜单**；也可以直接用子命令：
@@ -135,6 +135,15 @@ curl -fsSL https://raw.githubusercontent.com/onshine/ScriptHubs/main/qq-group-gu
 ./install.sh update            # 升级脚本本体，保留配置与观察数据
 ./install.sh uninstall         # 卸载（默认保留配置和数据）
 ```
+
+> 💡 **为什么推荐 `sh -c "$(curl ...)"` 而不是 `curl ... | sh`？**
+> 管道写法下 stdin 是脚本内容而不是你的键盘，菜单里的 `read` 会立刻读到 EOF，表现为「菜单一闪而过、按数字没反应」。
+> R1.0.1 起脚本已能自动处理管道场景（落盘重跑并把 stdin 接回 `/dev/tty`），所以 `curl ... | sh` 也可以正常交互了；
+> 若所在环境确实没有可用终端（部分容器 / CI），脚本会给出提示，此时请用免交互子命令：
+> ```bash
+> curl -fsSL .../install.sh | sh -s -- status
+> curl -fsSL .../install.sh | sh -s -- install --quiet
+> ```
 
 ### 安装后的文件布局
 
@@ -320,6 +329,15 @@ NapCat / Lagrange 在 WebUI 里开启「HTTP 服务器」并记下端口和 toke
 ---
 
 ## 版本记录
+
+### R1.0.1
+- 修复 `curl ... | sh` 管道运行时**菜单无法交互**的问题（stdin 被脚本内容占用，`read` 立即拿到 EOF）：
+  - 新增管道自举：检测到 `$0` 不是真实文件时，自动把脚本落盘重跑，并用 `< /dev/tty` 把标准输入接回终端
+  - 新增 `readtty()` 统一交互读取，stdin 非终端时改从 `/dev/tty` 读
+  - 新增 `has_tty()` 实际尝试打开 `/dev/tty` 来判断（`[ -e /dev/tty ]` 在部分环境存在但打不开，不可靠）
+  - 确实没有终端时（部分容器/CI）给出清晰指引，并支持 `sh -s -- <子命令>` 免交互用法
+  - 菜单读到空输入时优雅退出，不再空转
+- README 安装命令改为推荐 `sh -c "$(curl -fsSL ...)"`
 
 ### R1.0.0
 - 首发。基于原始 `group_kick.py` 重写：

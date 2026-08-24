@@ -1,7 +1,8 @@
 #!/bin/sh
-# qq-group-guard 一键安装 / 管理入口 R1.0.0
+# qq-group-guard 一键安装 / 管理入口 R1.0.1
 #
-# 一条命令搞定所有操作：
+# 一条命令搞定所有操作（两种写法都可以，菜单均可正常交互）：
+#   sh -c "$(curl -fsSL https://raw.githubusercontent.com/onshine/ScriptHubs/main/qq-group-guard/install.sh)"
 #   curl -fsSL https://raw.githubusercontent.com/onshine/ScriptHubs/main/qq-group-guard/install.sh | sh
 #
 # 也支持免交互子命令：
@@ -20,7 +21,7 @@
 #
 # 仓库：https://github.com/onshine/ScriptHubs/tree/main/qq-group-guard
 set -e
-SCRIPT_VERSION="R1.0.0"
+SCRIPT_VERSION="R1.0.1"
 RAWBASE="https://raw.githubusercontent.com/onshine/ScriptHubs/main/qq-group-guard"
 
 DIR=/opt/qq-group-guard
@@ -39,6 +40,63 @@ info() { printf "${C_B}·${C_0} %s\n" "$1"; }
 line() { printf '%s\n' "----------------------------------------------------------------"; }
 
 [ "$(id -u)" = "0" ] || { err "请用 root 运行（sudo -i 后再执行）"; exit 1; }
+
+# 检测是否有可真正读取的终端（-e /dev/tty 不可靠，某些环境存在但打不开）
+has_tty() { ( : < /dev/tty ) 2>/dev/null; }
+
+# ── 管道运行自举 ─────────────────────────────────────────────
+# `curl ... | sh` 时 stdin 是脚本内容而非终端，所有 read 都会立刻拿到 EOF，
+# 菜单会「选不动」。这里检测到该情形就把自己落盘、重新执行，并把 stdin 接回终端。
+SELFPATH="$0"
+if [ ! -f "$SELFPATH" ] || [ "$SELFPATH" = "sh" ] || [ "$SELFPATH" = "-sh" ] || [ "$SELFPATH" = "bash" ]; then
+  if [ -n "$QGG_BOOTSTRAPPED" ]; then
+    err "自举失败，请改用：sh -c \"\$(curl -fsSL $RAWBASE/install.sh)\""
+    exit 1
+  fi
+  if ! has_tty; then
+    # 无终端可用：只能跑免交互子命令，不能进菜单
+    if [ $# -eq 0 ]; then
+      err "当前环境没有可交互的终端，无法显示菜单。"
+      echo "  请改用下面任一方式："
+      echo "    sh -c \"\$(curl -fsSL $RAWBASE/install.sh)\"        # 推荐，可交互"
+      echo "    curl -fsSL $RAWBASE/install.sh -o i.sh && sh i.sh   # 先下载再运行"
+      echo "  或直接用免交互子命令，例如："
+      echo "    curl -fsSL $RAWBASE/install.sh | sh -s -- status"
+      exit 1
+    fi
+  fi
+  BOOT=/tmp/qq-group-guard-install.$$.sh
+  if command -v curl >/dev/null 2>&1; then
+    curl -fsSL -o "$BOOT" "$RAWBASE/install.sh?$(date +%s)$$" || {
+      err "下载脚本失败，请检查网络"; exit 1; }
+  elif command -v wget >/dev/null 2>&1; then
+    wget -qO "$BOOT" "$RAWBASE/install.sh?$(date +%s)$$" || {
+      err "下载脚本失败，请检查网络"; exit 1; }
+  else
+    err "未找到 curl/wget，请先安装其一"; exit 1
+  fi
+  chmod +x "$BOOT"
+  export QGG_BOOTSTRAPPED=1
+  # 关键：< /dev/tty 把标准输入接回终端，菜单才能交互
+  if has_tty; then
+    sh "$BOOT" "$@" < /dev/tty
+  else
+    sh "$BOOT" "$@"
+  fi
+  _rc=$?
+  rm -f "$BOOT"
+  exit $_rc
+fi
+
+# 交互读取：优先从终端读，避免 stdin 被占用时读到 EOF 死循环
+readtty() { # readtty <变量名>
+  if [ ! -t 0 ] && has_tty; then
+    read -r _rv < /dev/tty || _rv=""
+  else
+    read -r _rv || _rv=""
+  fi
+  eval "$1=\"\$_rv\""
+}
 
 # ── 依赖 ─────────────────────────────────────────────────────
 PKG=""
@@ -92,7 +150,7 @@ fetch_main() {
 # ── 交互式生成配置 ───────────────────────────────────────────
 ask() { # ask <提示> <默认值> <变量名>
   printf "  %s [%s]: " "$1" "$2"
-  read -r _a || _a=""
+  readtty _a
   [ -z "$_a" ] && _a="$2"
   eval "$3=\"\$_a\""
 }
@@ -296,7 +354,7 @@ cmd_install() {
   fi
   ask_cron=${QGG_CRON:-}
   if [ -z "$ask_cron" ]; then
-    printf "  定时周期 cron [0 */6 * * *]: "; read -r ask_cron || ask_cron=""
+    printf "  定时周期 cron [0 */6 * * *]: "; readtty ask_cron
     [ -z "$ask_cron" ] && ask_cron="0 */6 * * *"
   fi
   install_timer "$ask_cron"
@@ -407,7 +465,7 @@ cmd_update() {
 }
 
 cmd_uninstall() {
-  printf "是否同时删除配置与数据？(yes 删除 / 回车保留): "; read -r _p || _p=""
+  printf "是否同时删除配置与数据？(yes 删除 / 回车保留): "; readtty _p
   if has_systemd; then
     systemctl disable --now $SVC.timer 2>/dev/null || true
     rm -f /etc/systemd/system/$SVC.service /etc/systemd/system/$SVC.timer
@@ -440,16 +498,16 @@ menu() {
     echo "  9) 升级脚本"
     echo "  0) 卸载"
     echo "  q) 退出"
-    printf "请选择: "; read -r c || exit 0
+    printf "请选择: "; readtty c; [ -z "$c" ] && { echo; warn "读取输入失败或已到输入末尾，退出"; exit 0; }
     case "$c" in
       1) cmd_install ;;
       2) cmd_test ;;
       3) cmd_run ;;
-      4) printf "输入模式 (report/lenient/strict): "; read -r m; cmd_mode "$m" ;;
-      5) printf "输入 cron (如 0 */6 * * *): "; read -r cr; cmd_timer "$cr" ;;
+      4) printf "输入模式 (report/lenient/strict): "; readtty m; cmd_mode "$m" ;;
+      5) printf "输入 cron (如 0 */6 * * *): "; readtty cr; cmd_timer "$cr" ;;
       6) cmd_status ;;
       7) cmd_logs ;;
-      8) printf "输入 clear 清空，回车仅查看: "; read -r a; cmd_pending "$a" ;;
+      8) printf "输入 clear 清空，回车仅查看: "; readtty a; cmd_pending "$a" ;;
       9) cmd_update ;;
       0) cmd_uninstall; exit 0 ;;
       q|Q) exit 0 ;;

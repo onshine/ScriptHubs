@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-QQ 群名片守卫 · Python 版  R1.0.0
+QQ 群名片守卫 · Python 版  R1.0.1
 
 对上传的 group_kick.py 的重写版本：
   1. 自包含 —— 不再依赖 group_member_check.py，检查 + 踢人一体
@@ -28,7 +28,7 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-SCRIPT_VERSION = "R1.0.0"
+SCRIPT_VERSION = "R1.0.1"
 
 DEFAULT_CONFIG_PATHS = [
     Path(os.environ.get("QGG_CONFIG", "")) if os.environ.get("QGG_CONFIG") else None,

@@ -1,5 +1,5 @@
 /*
- * QQ 群名片守卫 qq-group-guard R1.0.0
+ * QQ 群名片守卫 qq-group-guard R1.0.1
  * 支持 Loon / Quantumult X / Surge
  * 仓库：https://github.com/onshine/ScriptHubs/tree/main/qq-group-guard
  *
@@ -12,10 +12,10 @@
  *   lenient 宽容模式（默认）：模糊匹配 + 观察期 + @提醒 + 连续多轮 + 单轮上限 + 比例熔断
  *   strict  严格模式：发现即踢（仍保留白名单/管理员/比例熔断保护）
  *
- * 版本：R1.0.0（与 SCRIPT_VERSION 及 README 保持一致）
+ * 版本：R1.0.1（与 SCRIPT_VERSION 及 README 保持一致）
  */
 
-const SCRIPT_VERSION = "R1.0.0";
+const SCRIPT_VERSION = "R1.0.1";
 const NAME = "QQ群名片守卫";
 
 // ── 读取插件 argument（兼容对象 / JSON 字符串 / k=v&k=v 三种形态）──
