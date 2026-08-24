@@ -1,5 +1,5 @@
 /*
- * QQ 群名片守卫 qq-group-guard R1.0.1
+ * QQ 群名片守卫 qq-group-guard R1.0.2
  * 支持 Loon / Quantumult X / Surge
  * 仓库：https://github.com/onshine/ScriptHubs/tree/main/qq-group-guard
  *
@@ -12,10 +12,10 @@
  *   lenient 宽容模式（默认）：模糊匹配 + 观察期 + @提醒 + 连续多轮 + 单轮上限 + 比例熔断
  *   strict  严格模式：发现即踢（仍保留白名单/管理员/比例熔断保护）
  *
- * 版本：R1.0.1（与 SCRIPT_VERSION 及 README 保持一致）
+ * 版本：R1.0.2（与 SCRIPT_VERSION 及 README 保持一致）
  */
 
-const SCRIPT_VERSION = "R1.0.1";
+const SCRIPT_VERSION = "R1.0.2";
 const NAME = "QQ群名片守卫";
 
 // ── 读取插件 argument（兼容对象 / JSON 字符串 / k=v&k=v 三种形态）──
@@ -242,10 +242,14 @@ function exemptReason(m, uid, now) {
 function isCompliant(name) {
   const n = norm(name);
   if (!n) return false; // 空名片视为不合规
+  const soft = softNorm(name);
   for (const kw of KEYWORDS) {
     if (/^re:/i.test(kw)) {
+      const pat = kw.slice(3);
       try {
-        if (new RegExp(kw.slice(3), "i").test(name)) return true;
+        const re = new RegExp(pat, "i");
+        // 原始名片与全角归一化后各匹配一次，避免全角写法被误杀
+        if (re.test(name) || re.test(soft)) return true;
       } catch (e) {
         /* 正则写错就当没配，不影响其它关键词 */
       }
@@ -255,6 +259,16 @@ function isCompliant(name) {
     if (k && n.indexOf(k) >= 0) return true;
   }
   return false;
+}
+
+// 仅做全角转半角，保留分隔符与数字，供 re: 正则匹配用。
+// 普通关键词走 norm()（去掉所有符号），但正则常依赖 _ - 数字等结构不能去符号；
+// 又必须做全角转换，否则「ＧＩＴＨＵＢ＿６６６」会被误伤。
+function softNorm(s) {
+  let t = String(s == null ? "" : s);
+  t = t.replace(/[\uFF01-\uFF5E]/g, (c) => String.fromCharCode(c.charCodeAt(0) - 0xfee0));
+  t = t.replace(/\u3000/g, " ");
+  return t;
 }
 
 // 全角转半角、去大小写、去空白/零宽/常见分隔符与装饰符号

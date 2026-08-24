@@ -1,5 +1,5 @@
 #!/bin/sh
-# qq-group-guard 一键安装 / 管理入口 R1.0.1
+# qq-group-guard 一键安装 / 管理入口 R1.0.2
 #
 # 一条命令搞定所有操作（两种写法都可以，菜单均可正常交互）：
 #   sh -c "$(curl -fsSL https://raw.githubusercontent.com/onshine/ScriptHubs/main/qq-group-guard/install.sh)"
@@ -21,7 +21,7 @@
 #
 # 仓库：https://github.com/onshine/ScriptHubs/tree/main/qq-group-guard
 set -e
-SCRIPT_VERSION="R1.0.1"
+SCRIPT_VERSION="R1.0.2"
 RAWBASE="https://raw.githubusercontent.com/onshine/ScriptHubs/main/qq-group-guard"
 
 DIR=/opt/qq-group-guard

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-QQ 群名片守卫 · Python 版  R1.0.1
+QQ 群名片守卫 · Python 版  R1.0.2
 
 对上传的 group_kick.py 的重写版本：
   1. 自包含 —— 不再依赖 group_member_check.py，检查 + 踢人一体
@@ -28,7 +28,7 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-SCRIPT_VERSION = "R1.0.1"
+SCRIPT_VERSION = "R1.0.2"
 
 DEFAULT_CONFIG_PATHS = [
     Path(os.environ.get("QGG_CONFIG", "")) if os.environ.get("QGG_CONFIG") else None,
@@ -201,14 +201,26 @@ def display_name(m: dict) -> str:
     return (m.get("card") or "").strip() or (m.get("nickname") or "").strip()
 
 
+def soft_norm(s: str) -> str:
+    """仅做 NFKC 全角转半角 + 转小写，保留分隔符与数字，供 re: 正则匹配用。
+
+    普通关键词走 norm()（去掉所有符号），但正则往往依赖 _ - 数字等结构，
+    不能去符号；又不能不做全角转换，否则「ＧＩＴＨＵＢ_６６６」会被误伤。
+    """
+    return unicodedata.normalize("NFKC", str(s or ""))
+
+
 def is_compliant(name: str, keywords) -> bool:
     n = norm(name)
     if not n:
         return False  # 空名片视为不合规
+    soft = soft_norm(name)
     for kw in keywords:
         if kw.lower().startswith("re:"):
+            pat = kw[3:]
             try:
-                if re.search(kw[3:], name, re.I):
+                # 原始名片与全角归一化后各匹配一次，避免全角写法被误杀
+                if re.search(pat, name, re.I) or re.search(pat, soft, re.I):
                     return True
             except re.error:
                 continue
