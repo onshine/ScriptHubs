@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-QQ 群名片守卫 · Python 版  R1.0.3
+QQ 群名片守卫 · Python 版  R1.0.4
 
 对上传的 group_kick.py 的重写版本：
   1. 自包含 —— 不再依赖 group_member_check.py，检查 + 踢人一体
@@ -28,7 +28,7 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-SCRIPT_VERSION = "R1.0.3"
+SCRIPT_VERSION = "R1.0.4"
 
 DEFAULT_CONFIG_PATHS = [
     Path(os.environ.get("QGG_CONFIG", "")) if os.environ.get("QGG_CONFIG") else None,
@@ -439,6 +439,45 @@ def patrol(bot: OneBot, gid: int, cfg: dict, assume_yes: bool) -> dict:
             "watching": len(watching), "kicked": ok, "failed": failed}
 
 
+def diagnose(err: str, api_base: str) -> str:
+    """把底层网络错误翻译成人话，直接告诉用户下一步做什么。"""
+    e = err.lower()
+    port = api_base.rsplit(":", 1)[-1].split("/")[0]
+    if "connection refused" in e or "errno 111" in e:
+        return (
+            "   ↳ 原因：{0} 上没有程序在监听，即 OneBot 机器人没在跑。\n"
+            "     qq-group-guard 只是「调用方」，它需要一个正在运行的\n"
+            "     OneBot v11 机器人（NapCat / go-cqhttp / Lagrange）提供 HTTP 接口。\n"
+            "     排查：ss -tlnp | grep {1}\n"
+            "     · 没装机器人 → 先装 NapCat（推荐）并开启 HTTP 服务器\n"
+            "     · 装了但没启动 → 启动它\n"
+            "     · 装了但端口不同 → 改 api_base 为实际端口"
+        ).format(api_base, port)
+    if "timed out" in e or "timeout" in e:
+        return (
+            "   ↳ 原因：连上了但超时。可能是防火墙拦了，或机器人卡死。\n"
+            "     若 OneBot 在另一台机器，检查安全组/iptables 是否放行该端口。"
+        )
+    if "401" in e or "403" in e or "token" in e:
+        return (
+            "   ↳ 原因：鉴权失败。config.json 里的 token 与 OneBot 的\n"
+            "     access_token 不一致，或该填却留空了。"
+        )
+    if "404" in e:
+        return (
+            "   ↳ 原因：接口不存在。可能 api_base 指向了 WebUI 端口而非 HTTP API 端口，\n"
+            "     或该实现未开启 OneBot v11 HTTP 服务。"
+        )
+    if "name or service not known" in e or "nodename nor servname" in e:
+        return "   ↳ 原因：域名解析失败，检查 api_base 里的主机名是否写错。"
+    if "非 json" in err or "not json" in e:
+        return (
+            "   ↳ 原因：返回的不是 JSON，api_base 可能指向了网页端口（如 WebUI）。\n"
+            "     请填 OneBot v11 HTTP API 的端口。"
+        )
+    return "   ↳ 提示：可运行 doctor.sh 做一次连接诊断。"
+
+
 # ─────────────────────────── CLI ────────────────────────────
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
@@ -522,6 +561,7 @@ def main() -> int:
             results.append(patrol(bot, gid, cfg, args.yes))
         except RuntimeError as e:
             log(f"❌ 群 {gid} 处理失败：{e}")
+            log(diagnose(str(e), cfg["api_base"]))
             results.append({"group_id": gid, "error": str(e)})
 
     if args.json_out:

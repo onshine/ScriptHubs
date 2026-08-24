@@ -1,10 +1,28 @@
 # QQ 群名片守卫 · qq-group-guard
 
-**版本：R1.0.3**
+**版本：R1.0.4**
 
 定时巡检 QQ 群成员名片，对不符合群规格式的成员按「**宽容模式**」分级处理：观察期内只在群里 @ 提醒改名，连续多轮仍不改才踢出。
 
 基于 OneBot v11 HTTP API，兼容 **go-cqhttp / NapCat / Lagrange / LLOneBot** 等实现。
+
+> ## ⚠️ 前置要求：必须先有一个在运行的 QQ 机器人
+>
+> **本项目只是「调用方」，它自己不能登录 QQ、不能读群成员。**
+> 它需要一个已经登录了机器人账号、并开启了 **OneBot v11 HTTP 服务**的程序（推荐 NapCat）为它提供接口。
+>
+> ```
+>  ┌─────────────────┐   HTTP    ┌──────────────────┐   QQ 协议   ┌────────┐
+>  │ qq-group-guard  │ ────────> │ NapCat / go-cqhttp│ ─────────> │ QQ 服务器│
+>  │ （本项目 · 大脑） │           │ （机器人 · 手脚）   │            └────────┘
+>  └─────────────────┘           └──────────────────┘
+> ```
+>
+> 只填群号、机器人 QQ、管理员这些参数是**不够的** —— 那只是告诉本项目「去查哪个群」，
+> 但「怎么连上 QQ」得靠机器人程序。
+>
+> 如果看到 `Connection refused`，就是机器人没装或没启动。
+> 运行 `./install.sh doctor` 可自动诊断。安装机器人的步骤见下方 [五、OneBot 端准备](#五onebot-端准备)。
 
 提供三种用法，同一套参数：
 
@@ -132,6 +150,7 @@ sh -c "$(curl -fsSL https://raw.githubusercontent.com/onshine/ScriptHubs/main/qq
 ./install.sh logs 100          # 看最近 100 行日志
 ./install.sh pending           # 查看观察期名单（谁被盯上了、第几轮、过了多久）
 ./install.sh pending clear     # 清空观察记录，所有人重新从第 1 轮计时
+./install.sh doctor            # 连接诊断（Connection refused 时用）
 ./install.sh update            # 升级脚本本体，保留配置与观察数据
 ./install.sh uninstall         # 卸载（默认保留配置和数据）
 ```
@@ -288,29 +307,72 @@ qq-group-guard -g 123456789 -k 深圳 -m strict --max-kick 3 -i 3 --yes
 
 ## 五、OneBot 端准备
 
-以 go-cqhttp 为例，`config.yml` 需启用 HTTP 服务：
+> qq-group-guard 不能自己登录 QQ，必须先跑一个 OneBot v11 机器人。以下以目前最省心的 **NapCat** 为例。
 
-```yaml
-servers:
-  - http:
-      address: 127.0.0.1:5700
-      middlewares:
-        access-token: your-access-token
+### 步骤 1：安装并登录 NapCat
+
+在 VPS 上（推荐 Docker 方式）：
+
+```bash
+# 官方一键脚本（自行到 NapCatQQ 项目确认最新命令）
+curl -o napcat.sh https://nclatest.znin.net/NapNeko/NapCat-Installer/main/script/install.sh
+sudo bash napcat.sh
 ```
 
-NapCat / Lagrange 在 WebUI 里开启「HTTP 服务器」并记下端口和 token 即可。
+装好后按提示用**机器人账号**扫码 / 快速登录。注意这个 QQ 号就是你要填的 `self_qq`（`2854196310`），
+**它必须是目标群的管理员**（否则踢不了人）。
 
-脚本用到的 API：
+### 步骤 2：开启 HTTP 服务器
+
+NapCat 登录后进 WebUI（默认 `http://VPS_IP:6099`）→ 「网络配置」→ 新建 **HTTP 服务器**：
+
+| 项 | 填什么 |
+|---|---|
+| 监听地址 | `127.0.0.1`（本机跑）或 `0.0.0.0`（远程连） |
+| 端口 | 如 `5700` |
+| Token | 可留空；若设了，配置向导的 access_token 要填一样的 |
+
+保存后**记下端口**，这就是你 `api_base` 要填的：`http://127.0.0.1:5700`。
+
+> go-cqhttp 用户改 `config.yml`：
+> ```yaml
+> servers:
+>   - http:
+>       address: 127.0.0.1:5700
+>       middlewares:
+>         access-token: your-access-token
+> ```
+
+### 步骤 3：验证连通
+
+```bash
+./install.sh doctor
+```
+
+看到 `✔ 端口 5700 有程序监听` 就绪。再 `./install.sh test` 试跑。
+
+### 脚本用到的 API 与权限
 
 | API | 用途 | 权限要求 |
 |---|---|---|
 | `get_group_member_list` | 拉取成员列表 | 机器人在群内 |
 | `send_group_msg` | 观察期 @ 提醒 | 机器人未被禁言 |
-| `set_group_kick` | 踢出成员 | **机器人必须是管理员** |
+| `set_group_kick` | 踢出成员 | **机器人必须是群管理员** |
 
 ---
 
 ## 六、FAQ
+
+**Q：报 `Connection refused` / `[Errno 111]`？**
+端口上没有程序监听，也就是 OneBot 机器人没跑起来。这是最常见的问题，按顺序查：
+1. `./install.sh doctor` —— 自动诊断，会告诉你端口有没有人监听、系统里有没有装机器人
+2. 没装机器人 → 按上方[五、OneBot 端准备](#五onebot-端准备)装 NapCat
+3. 装了没启动 → 启动它，`ss -tlnp | grep 5700` 应能看到监听
+4. 端口不一样 → 菜单 `1)` 重新配置，把 api_base 改成机器人实际的 HTTP 端口
+
+**Q：只填群号、机器人 QQ、管理员就够了吗？**
+不够。那些只是告诉脚本「查哪个群、别踢谁」，但「怎么连上 QQ」要靠单独的机器人程序（NapCat 等）。本项目是调用方，不是机器人本体。
+
 
 **Q：第一次用怎么最稳妥？**
 1. `mode` 设 `report` 装上，跑 2~3 天
@@ -350,6 +412,14 @@ sh -c "$(curl -fsSL https://raw.githubusercontent.com/onshine/ScriptHubs/main/qq
 ---
 
 ## 版本记录
+
+### R1.0.4
+- 新增 `doctor.sh` 连接诊断脚本（菜单 `d)` / 子命令 `doctor`）：检查端口是否有监听、
+  系统里装了哪个机器人、探测常见端口，直接指出 `Connection refused` 的原因
+- 运行出错时不再只丢一句底层报错，改为**翻译成人话并给出下一步**
+  （连接被拒 / 超时 / 401-403 鉴权 / 404 接口不存在 / DNS 失败 / 返回非 JSON 分别给不同提示）
+- README 顶部新增**前置要求**说明与架构图，明确本项目是「调用方」，
+  必须先有一个在运行的 OneBot 机器人；补充 NapCat 三步安装指引与对应 FAQ
 
 ### R1.0.3
 - 修复配置向导里**填含反斜杠的正则会生成非法 JSON** 的问题

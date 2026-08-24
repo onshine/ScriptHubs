@@ -1,5 +1,5 @@
 #!/bin/sh
-# qq-group-guard 一键安装 / 管理入口 R1.0.3
+# qq-group-guard 一键安装 / 管理入口 R1.0.4
 #
 # 一条命令搞定所有操作（两种写法都可以，菜单均可正常交互）：
 #   sh -c "$(curl -fsSL https://raw.githubusercontent.com/onshine/ScriptHubs/main/qq-group-guard/install.sh)"
@@ -16,12 +16,13 @@
 #   ./install.sh status           查看状态、下次运行时间、观察期名单
 #   ./install.sh logs             查看最近日志
 #   ./install.sh pending          查看/清空观察期记录
+#   ./install.sh doctor           连接诊断（Connection refused 时用）
 #   ./install.sh update           升级脚本本体（保留配置）
 #   ./install.sh uninstall        卸载（默认保留配置与数据）
 #
 # 仓库：https://github.com/onshine/ScriptHubs/tree/main/qq-group-guard
 set -e
-SCRIPT_VERSION="R1.0.3"
+SCRIPT_VERSION="R1.0.4"
 RAWBASE="https://raw.githubusercontent.com/onshine/ScriptHubs/main/qq-group-guard"
 
 DIR=/opt/qq-group-guard
@@ -157,6 +158,31 @@ fetch_main() {
   chmod 755 "$DIR/qq-group-guard.py"
   ln -sf "$DIR/qq-group-guard.py" "$BIN"
   ok "脚本已安装：$DIR/qq-group-guard.py（$BIN）"
+
+  # 附带装上连接诊断脚本（失败不影响主流程）
+  _dr="$DIR/doctor.sh"
+  if [ -n "$_self_dir" ] && [ -f "$_self_dir/doctor.sh" ]; then
+    cp "$_self_dir/doctor.sh" "$_dr" 2>/dev/null && chmod 755 "$_dr"
+  else
+    curl -fsSL -o "$_dr" "$RAWBASE/doctor.sh?$(date +%s)$$" 2>/dev/null && chmod 755 "$_dr"
+  fi
+}
+
+# ── 连接诊断 ─────────────────────────────────────────────────
+cmd_doctor() {
+  if [ -f "$DIR/doctor.sh" ]; then
+    sh "$DIR/doctor.sh"
+  elif [ -f "$(dirname "$0")/doctor.sh" ]; then
+    sh "$(dirname "$0")/doctor.sh"
+  else
+    _tmp=/tmp/qgg-doctor.$$.sh
+    if curl -fsSL -o "$_tmp" "$RAWBASE/doctor.sh?$(date +%s)$$" 2>/dev/null; then
+      sh "$_tmp"; rm -f "$_tmp"
+    else
+      err "无法获取 doctor.sh，请检查网络"
+      return 1
+    fi
+  fi
 }
 
 # ── 交互式生成配置 ───────────────────────────────────────────
@@ -568,6 +594,7 @@ menu() {
     echo "  7) 查看日志"
     echo "  8) 查看 / 清空观察期名单"
     echo "  9) 升级脚本"
+    echo "  d) 连接诊断（Connection refused 时用这个）"
     echo "  0) 卸载"
     echo "  q) 退出"
     printf "请选择: "; readtty c; [ -z "$c" ] && { echo; warn "读取输入失败或已到输入末尾，退出"; exit 0; }
@@ -581,6 +608,7 @@ menu() {
       7) cmd_logs ;;
       8) printf "输入 clear 清空，回车仅查看: "; readtty a; cmd_pending "$a" ;;
       9) cmd_update ;;
+      d|D) cmd_doctor ;;
       0) cmd_uninstall; exit 0 ;;
       q|Q) exit 0 ;;
       *) warn "无效选择" ;;
@@ -598,6 +626,7 @@ case "${1:-}" in
   status)    cmd_status ;;
   logs)      cmd_logs "$2" ;;
   pending)   cmd_pending "$2" ;;
+  doctor)    cmd_doctor ;;
   update)    cmd_update ;;
   uninstall) cmd_uninstall ;;
   -v|--version) echo "qq-group-guard installer $SCRIPT_VERSION" ;;
