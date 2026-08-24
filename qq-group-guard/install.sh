@@ -1,5 +1,5 @@
 #!/bin/sh
-# qq-group-guard 一键安装 / 管理入口 R1.0.2
+# qq-group-guard 一键安装 / 管理入口 R1.0.3
 #
 # 一条命令搞定所有操作（两种写法都可以，菜单均可正常交互）：
 #   sh -c "$(curl -fsSL https://raw.githubusercontent.com/onshine/ScriptHubs/main/qq-group-guard/install.sh)"
@@ -21,7 +21,7 @@
 #
 # 仓库：https://github.com/onshine/ScriptHubs/tree/main/qq-group-guard
 set -e
-SCRIPT_VERSION="R1.0.2"
+SCRIPT_VERSION="R1.0.3"
 RAWBASE="https://raw.githubusercontent.com/onshine/ScriptHubs/main/qq-group-guard"
 
 DIR=/opt/qq-group-guard
@@ -238,41 +238,101 @@ print(','.join(map(str,v)) if isinstance(v,list) else v)
     exit 1
   fi
 
-  {
-    echo '{'
-    printf '  "api_base": "%s",\n' "$V_API"
-    printf '  "token": "%s",\n' "$V_TOKEN"
-    echo '  "group_id": ['
-    json_num_arr "$V_GROUP"
-    echo '  ],'
-    echo '  "keywords": ['
-    json_arr "$V_KW"
-    echo '  ],'
-    printf '  "mode": "%s",\n' "$V_MODE"
-    printf '  "grace_hours": %s,\n' "$V_HOURS"
-    printf '  "grace_rounds": %s,\n' "$V_ROUNDS"
-    printf '  "new_member_days": %s,\n' "$V_NEW"
-    printf '  "veteran_days": 0,\n'
-    echo '  "whitelist": ['
-    json_num_arr "$V_WL"
-    echo '  ],'
-    printf '  "skip_admin": true,\n'
-    printf '  "skip_title": true,\n'
-    printf '  "self_qq": %s,\n' "$V_SELF"
-    printf '  "interval": %s,\n' "$V_INT"
-    printf '  "max_kick": %s,\n' "$V_MAXK"
-    printf '  "max_ratio": %s,\n' "$V_RATIO"
-    printf '  "breaker_min": 5,\n'
-    printf '  "reject_add": false,\n'
-    printf '  "warn_in_group": %s,\n' "$V_WARN"
-    printf '  "warn_template": "请在 {hours} 小时内把群名片改成含「{keywords}」的格式，否则将被移出本群。",\n'
-    printf '  "timeout": 20,\n'
-    printf '  "state_dir": "%s",\n' "$STATE_DIR"
-    printf '  "log_dir": "%s"\n' "$LOG_DIR"
-    echo '}'
-  } > "$CONF.tmp"
+  # 用 Python 生成 JSON：由 json.dump 负责转义，避免 shell 拼接时
+  # 正则里的 \s \d \- 等反斜杠变成 JSON 非法转义符（Invalid \escape）。
+  # 值通过环境变量传递，不进命令行，避免引号与 $ 展开问题。
+  QGG_V_API="$V_API" QGG_V_TOKEN="$V_TOKEN" QGG_V_GROUP="$V_GROUP" \
+  QGG_V_KW="$V_KW" QGG_V_MODE="$V_MODE" QGG_V_HOURS="$V_HOURS" \
+  QGG_V_ROUNDS="$V_ROUNDS" QGG_V_NEW="$V_NEW" QGG_V_WL="$V_WL" \
+  QGG_V_SELF="$V_SELF" QGG_V_INT="$V_INT" QGG_V_MAXK="$V_MAXK" \
+  QGG_V_RATIO="$V_RATIO" QGG_V_WARN="$V_WARN" \
+  QGG_STATE_DIR_="$STATE_DIR" QGG_LOG_DIR_="$LOG_DIR" \
+  python3 - "$CONF.tmp" <<'PYEOF'
+import json, os, re, sys
 
-  python3 -c "import json;json.load(open('$CONF.tmp'))" || { err "生成的配置不是合法 JSON"; exit 1; }
+def s(k, d=""):
+    return os.environ.get(k, d).strip()
+
+def num(k, d):
+    v = s(k)
+    if not v:
+        return d
+    try:
+        f = float(v)
+        return int(f) if f == int(f) else f
+    except ValueError:
+        return d
+
+def intlist(k):
+    return [int(x) for x in re.split(r"[,，\s]+", s(k)) if x.strip().isdigit()]
+
+def strlist(k):
+    # 关键词可能含正则，里面的逗号不能拆；仅按英文逗号分隔并去首尾空白
+    return [x.strip() for x in s(k).split(",") if x.strip()]
+
+def bl(k, d=True):
+    v = s(k).lower()
+    if not v:
+        return d
+    return v in ("1", "true", "yes", "y", "on")
+
+cfg = {
+    "api_base": s("QGG_V_API", "http://127.0.0.1:5700").rstrip("/"),
+    "token": s("QGG_V_TOKEN"),
+    "group_id": intlist("QGG_V_GROUP"),
+    "keywords": strlist("QGG_V_KW"),
+    "mode": s("QGG_V_MODE", "report") or "report",
+    "grace_hours": num("QGG_V_HOURS", 48),
+    "grace_rounds": int(num("QGG_V_ROUNDS", 2)),
+    "new_member_days": num("QGG_V_NEW", 3),
+    "veteran_days": 0,
+    "whitelist": intlist("QGG_V_WL"),
+    "skip_admin": True,
+    "skip_title": True,
+    "self_qq": int(num("QGG_V_SELF", 0)),
+    "interval": num("QGG_V_INT", 1.5),
+    "max_kick": int(num("QGG_V_MAXK", 5)),
+    "max_ratio": num("QGG_V_RATIO", 30),
+    "breaker_min": 5,
+    "reject_add": False,
+    "warn_in_group": bl("QGG_V_WARN", True),
+    "warn_template": "请在 {hours} 小时内把群名片改成含「{keywords}」的格式，否则将被移出本群。",
+    "timeout": 20,
+    "state_dir": s("QGG_STATE_DIR_", "/var/lib/qq-group-guard"),
+    "log_dir": s("QGG_LOG_DIR_", "/var/log/qq-group-guard"),
+}
+
+# 正则关键词预校验：写错的正则会让该条永远匹配不上，等于白配
+bad = []
+for kw in cfg["keywords"]:
+    if kw.lower().startswith("re:"):
+        try:
+            re.compile(kw[3:])
+        except re.error as e:
+            bad.append(f"{kw}  ->  {e}")
+if bad:
+    sys.stderr.write("正则关键词有误，请修正后重试：\n")
+    for b in bad:
+        sys.stderr.write("  " + b + "\n")
+    sys.exit(3)
+
+with open(sys.argv[1], "w", encoding="utf-8") as f:
+    json.dump(cfg, f, ensure_ascii=False, indent=2)
+    f.write("\n")
+PYEOF
+  _gen=$?
+  if [ "$_gen" = "3" ]; then
+    err "关键词里的正则不合法，配置未保存"
+    rm -f "$CONF.tmp"
+    exit 1
+  elif [ "$_gen" != "0" ]; then
+    err "生成配置失败（python3 退出码 $_gen）"
+    rm -f "$CONF.tmp"
+    exit 1
+  fi
+
+  python3 -c "import json,sys;json.load(open(sys.argv[1]))" "$CONF.tmp" 2>/dev/null || {
+    err "生成的配置不是合法 JSON"; rm -f "$CONF.tmp"; exit 1; }
   mv "$CONF.tmp" "$CONF"
   chmod 600 "$CONF"   # 内含 token，禁止其他用户读
   ok "配置已写入 $CONF（权限 600）"
