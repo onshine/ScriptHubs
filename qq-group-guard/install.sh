@@ -77,16 +77,28 @@ if [ ! -f "$SELFPATH" ] || [ "$SELFPATH" = "sh" ] || [ "$SELFPATH" = "-sh" ] || 
   fi
   chmod +x "$BOOT"
   export QGG_BOOTSTRAPPED=1
+  # 中断/异常也要清掉临时脚本
+  trap 'rm -f "$BOOT"' EXIT INT TERM HUP
   # 关键：< /dev/tty 把标准输入接回终端，菜单才能交互
+  set +e
   if has_tty; then
     sh "$BOOT" "$@" < /dev/tty
   else
     sh "$BOOT" "$@"
   fi
   _rc=$?
+  set -e
   rm -f "$BOOT"
+  trap - EXIT INT TERM HUP
   exit $_rc
 fi
+
+# 提示里展示给用户的命令名：自举时 $0 是 /tmp 临时路径，展示它会误导用户
+case "$0" in
+  /tmp/qq-group-guard-install.*)
+    SELFNAME="sh -c \"\$(curl -fsSL $RAWBASE/install.sh)\"" ;;
+  *) SELFNAME="$0" ;;
+esac
 
 # 交互读取：优先从终端读，避免 stdin 被占用时读到 EOF 死循环
 readtty() { # readtty <变量名>
@@ -361,13 +373,13 @@ cmd_install() {
   line
   ok "安装完成！强烈建议先跑一次 report 模式确认名单："
   echo "    qq-group-guard --config $CONF --mode report"
-  echo "  或： $0 test"
+  echo "  或： $SELFNAME test"
   line
   cmd_status
 }
 
 cmd_test() {
-  [ -f "$CONF" ] || { err "未找到配置 $CONF，请先运行：$0 install"; exit 1; }
+  [ -f "$CONF" ] || { err "未找到配置 $CONF，请先运行：$SELFNAME install"; exit 1; }
   info "以 report 模式试跑（绝对不会踢人）..."
   python3 "$DIR/qq-group-guard.py" --config "$CONF" --mode report
 }
@@ -417,7 +429,7 @@ print(f"    单轮上限  : {c.get('max_kick')} 人")
 print(f"    熔断阈值  : {c.get('max_ratio')}% 且 >= {c.get('breaker_min')} 人")
 PY
   else
-    warn "配置未生成，运行：$0 install"
+    warn "配置未生成，运行：$SELFNAME install"
   fi
   [ -f "$CONF_DIR/cron" ] && info "定时周期：$(cat "$CONF_DIR/cron")"
   if has_systemd; then
@@ -425,7 +437,7 @@ PY
     systemctl list-timers $SVC.timer --no-pager 2>/dev/null | sed -n '2p'
   fi
   _n=$(ls "$STATE_DIR"/pending_*.json 2>/dev/null | wc -l)
-  [ "$_n" -gt 0 ] && info "观察期文件 $_n 个（$0 pending 查看）"
+  [ "$_n" -gt 0 ] && info "观察期文件 $_n 个（$SELFNAME pending 查看）"
   line
 }
 
@@ -454,7 +466,7 @@ for uid,v in d.items():
     print(f"   {uid}  {v.get('name','')}  第{v.get('rounds',0)}轮  已过 {h:.1f}h")
 PY
   done
-  info "清空：$0 pending clear"
+  info "清空：$SELFNAME pending clear"
 }
 
 cmd_update() {
