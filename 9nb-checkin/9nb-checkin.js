@@ -1,11 +1,11 @@
 /*
  * 9NB.DE 多账号自动登录签到
- * 版本: 2026-09-15.r2.6.0
+ * 版本: 2026-09-15.r2.7.0
  * 默认每天 08:00 执行；账号去重；账号间随机等待 0-5 分钟。
  * 账号密码仅用于 Loon 本地登录，不会上传或输出密码。
  */
 
-const SCRIPT_VERSION = "2026-09-15.r2.6.0";
+const SCRIPT_VERSION = "2026-09-15.r2.7.0";
 const NAME = "9NB签到";
 const BASE = "https://9nb.de";
 const STORE_KEY = "9nb_checkin_accounts";
@@ -78,19 +78,26 @@ function loadAccounts(raw) {
 
 async function runAccount(account) {
   let cookie = account.cookie || "";
+  console.log(`[${account.username}] 准备登录，已有Cookie=${cookie ? "是" : "否"}`);
   if (!cookie || !account.password) {
     if (!account.password) throw new Error("未提供密码，且本地没有已保存Cookie");
     cookie = await login(account.username, account.password);
+    console.log(`[${account.username}] 登录Cookie获取成功，名称=${cookieNames(cookie)}`);
     saveAccount(account.username, cookie);
+    console.log(`[${account.username}] 登录Cookie已保存到Loon持久化存储`);
   }
+  console.log(`[${account.username}] GET /nb_checkin 验证登录状态`);
   let page = await request("GET", BASE + "/nb_checkin", cookie);
+  console.log(`[${account.username}] 签到页登录状态=${isLoginPage(page) ? "未登录" : "已登录"}`);
   if (isLoginPage(page)) {
     if (!account.password) throw new Error("Cookie已失效，请在Argument补充密码");
+    console.log(`[${account.username}] Cookie失效，重新模拟登录`);
     cookie = await login(account.username, account.password);
     saveAccount(account.username, cookie);
+    console.log(`[${account.username}] 新Cookie已保存，重新验证签到页`);
     page = await request("GET", BASE + "/nb_checkin", cookie);
   }
-  if (isLoginPage(page)) throw new Error("登录失败，请检查账号密码");
+  if (isLoginPage(page)) throw new Error("登录后验证仍未通过，请检查账号密码或站点登录限制");
   const beforeBalance = extractBalance(page);
   const csrf = extractCsrf(page);
   if (!csrf) throw new Error("未找到签到CSRF");
@@ -110,14 +117,19 @@ async function runAccount(account) {
 }
 
 async function login(username, password) {
-  // 先保留登录页下发的 bbs_csrf，再提交登录表单；Cookie必须跨GET/POST合并。
+  console.log(`[${username}] 1/6 GET /login`);
   const first = await requestResponse("GET", BASE + "/login", "");
+  console.log(`[${username}] 2/6 登录页HTTP=${first.status || "未知"}，响应Cookie=${cookieHeaderNames(first.headers) || "无"}`);
   const csrf = extractCsrf(first.body);
+  console.log(`[${username}] 3/6 登录页CSRF=${csrf ? "已获取" : "未获取"}`);
   if (!csrf) throw new Error("登录页未找到CSRF");
   const initialCookie = mergeCookies(first.headers, "");
+  console.log(`[${username}] 4/6 准备POST /login，初始Cookie=${cookieNames(initialCookie) || "无"}`);
   const body = `_csrf=${encodeURIComponent(csrf)}&username=${encodeURIComponent(username)}&password=${encodeURIComponent(password)}`;
   const response = await requestResponse("POST", BASE + "/login", initialCookie, body, false);
+  console.log(`[${username}] 5/6 登录POST HTTP=${response.status || "未知"}，响应Cookie=${cookieHeaderNames(response.headers) || "无"}`);
   const cookie = mergeCookies(response.headers, initialCookie);
+  console.log(`[${username}] 6/6 合并Cookie=${cookieNames(cookie) || "无"}`);
   if (!cookie || !/bbs_auth=/.test(cookie)) {
     const detail = stripHtml(response.body).replace(/\s+/g, " ").trim();
     if (/form_error|用户名|密码|错误|失败/.test(detail)) throw new Error(`登录被站点拒绝${response.status ? "（HTTP " + response.status + "）" : ""}`);
@@ -159,6 +171,11 @@ function mergeCookies(headers, old) {
   if (!Array.isArray(values)) values = [values];
   values.forEach(v => String(v).split(/,\s*(?=[^;,=]+=[^;,]+)/).forEach(x => { const m = x.match(/^\s*([^=;]+)=([^;]*)/); if (m && !/^(Path|Expires|Max-Age|Domain|SameSite|Secure|HttpOnly)$/i.test(m[1])) out[m[1]] = m[2]; }));
   return Object.keys(out).map(k => `${k}=${out[k]}`).join("; ");
+}
+function cookieNames(cookie) { return String(cookie || "").split(";").map(x => x.trim().split("=")[0]).filter(Boolean).join(","); }
+function cookieHeaderNames(headers) {
+  const v = headers && (headers["set-cookie"] || headers["Set-Cookie"] || headers["SET-COOKIE"] || "");
+  return (Array.isArray(v) ? v : [v]).map(x => String(x).match(/^\s*([^=;]+)/)).filter(Boolean).map(x => x[1]).join(",");
 }
 function stripHtml(s) { return String(s).replace(/<script[\s\S]*?<\/script>/gi, "").replace(/<style[\s\S]*?<\/style>/gi, "").replace(/<[^>]+>/g, " ").replace(/&nbsp;/g, " "); }
 function parseJSON(s, fallback) { try { return s ? JSON.parse(s) : fallback; } catch (_) { return fallback; } }
