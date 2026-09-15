@@ -1,11 +1,11 @@
 /*
  * 9NB.DE 多账号自动登录签到
- * 版本: 2026-09-15.r2.7.0
+ * 版本: 2026-09-15.r2.8.0
  * 默认每天 08:00 执行；账号去重；账号间随机等待 0-5 分钟。
  * 账号密码仅用于 Loon 本地登录，不会上传或输出密码。
  */
 
-const SCRIPT_VERSION = "2026-09-15.r2.7.0";
+const SCRIPT_VERSION = "2026-09-15.r2.8.0";
 const NAME = "9NB签到";
 const BASE = "https://9nb.de";
 const STORE_KEY = "9nb_checkin_accounts";
@@ -34,6 +34,10 @@ const UA = "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/6
         const line = `账号${i + 1}（${accounts[i].username}）：失败 - ${e && e.message ? e.message : String(e)}`;
         console.log(line);
         results.push(line);
+        if (/登录|Cookie/.test(line)) {
+          console.log("登录失败，停止后续账号，避免继续等待并产生误导");
+          break;
+        }
       }
     }
     finish("9NB签到结果", results.join("\n"), results.some(x => /失败/.test(x)));
@@ -99,6 +103,8 @@ async function runAccount(account) {
   }
   if (isLoginPage(page)) throw new Error("登录后验证仍未通过，请检查账号密码或站点登录限制");
   const beforeBalance = extractBalance(page);
+  const buttons = checkinButtons(page);
+  console.log(`[${account.username}] 签到按钮：${buttons || "今日已签到或页面未提供按钮"}`);
   const csrf = extractCsrf(page);
   if (!csrf) throw new Error("未找到签到CSRF");
   let message = "今天已经签到";
@@ -171,6 +177,12 @@ function mergeCookies(headers, old) {
   if (!Array.isArray(values)) values = [values];
   values.forEach(v => String(v).split(/,\s*(?=[^;,=]+=[^;,]+)/).forEach(x => { const m = x.match(/^\s*([^=;]+)=([^;]*)/); if (m && !/^(Path|Expires|Max-Age|Domain|SameSite|Secure|HttpOnly)$/i.test(m[1])) out[m[1]] = m[2]; }));
   return Object.keys(out).map(k => `${k}=${out[k]}`).join("; ");
+}
+function checkinButtons(html) {
+  const s = String(html);
+  const fixed = /name=["']mode["'][^>]*value=["']fixed["']/i.test(s);
+  const random = /name=["']mode["'][^>]*value=["']random["']/i.test(s);
+  return [fixed ? "直接签到+5" : "", random ? "试试手气" : ""].filter(Boolean).join("、");
 }
 function cookieNames(cookie) { return String(cookie || "").split(";").map(x => x.trim().split("=")[0]).filter(Boolean).join(","); }
 function cookieHeaderNames(headers) {
