@@ -1,11 +1,11 @@
 /*
  * 9NB.DE 多账号自动登录签到
- * 版本: 2026-09-15.r2.12.0
+ * 版本: 2026-09-15.r2.13.0
  * 默认每天 08:00 执行；账号去重；账号间随机等待 0-5 分钟。
  * 账号密码仅用于 Loon 本地登录，不会上传或输出密码。
  */
 
-const SCRIPT_VERSION = "2026-09-15.r2.12.0"
+const SCRIPT_VERSION = "2026-09-15.r2.13.0";
 const NAME = "9NB签到";
 const BASE = "https://9nb.de";
 const STORE_KEY = "9nb_checkin_browser_cookies";
@@ -16,7 +16,7 @@ const UA = "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/6
     if (typeof $request !== "undefined" && $request) return captureCookie();
     const input = readArgument();
     const accounts = loadAccounts(input);
-    if (!accounts.length) throw new Error("未读取到有效Cookie。请在Argument填写：账号:bbs_auth=...; bbs_csrf=...|账号:bbs_auth=...; bbs_csrf=...；必须包含bbs_auth");
+    if (!accounts.length) throw new Error("未读取到Cookie。请在Loon中打开 https://9nb.de/ 并登录，再打开 https://9nb.de/nb_checkin；或在Argument填写：账号:bbs_auth=...; bbs_csrf=...|账号:bbs_auth=...");
     const results = [];
     for (let i = 0; i < accounts.length; i++) {
       console.log(`账号${i + 1}（${accounts[i].username}）开始处理`);
@@ -142,7 +142,7 @@ function saveAccount(username, cookie) {
 }
 function captureCookie() {
   const url = String($request.url || "");
-  if (!/9nb\.de\/nb_checkin(?:[/?]|$)/i.test(url)) return;
+  if (!/9nb\.de\/(?:login|nb_checkin)(?:[/?]|$)/i.test(url)) return;
   const h = $request.headers || {};
   const cookie = h.Cookie || h.cookie || "";
   if (!cookie || !/bbs_auth=/.test(cookie)) return;

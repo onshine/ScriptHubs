@@ -9,10 +9,10 @@ Loon 每日自动签到脚本，适用于 https://9nb.de/。采用浏览器登�
 首次使用：
 
 1. 导入插件并保持默认每天 08:00 执行。
-2. 开启Loon的HTTPS解密和MITM，打开第一个账号的 `https://9nb.de/` 并登录。
-3. 登录成功后进入 `https://9nb.de/nb_checkin`，让Loon捕获该账号的完整Cookie。
+2. 开启Loon的HTTPS解密和MITM，确认MITM域名只填写 `9nb.de`，然后在Loon浏览器中打开 `https://9nb.de/` 并登录。
+3. 登录成功后进入 `https://9nb.de/nb_checkin`，捕获规则会自动提取 `bbs_auth` 并保存该账号Cookie。
 4. 退出该账号，再登录下一个账号并重复第2～3步。
-5. Loon捕获后会自动保存每个账号的 `bbs_auth` 和完整Cookie；如果Argument留空，脚本会自动读取所有已保存账号。也可以手动把每个账号捕获到的完整Cookie填写到插件 Argument 的 `多账号Cookie`：
+5. Loon捕获后会自动保存每个账号的 `bbs_auth` 和完整Cookie；如果Argument留空，脚本会自动读取所有已保存账号。也可以手动输入完整Cookie：
 
 ```text
 武则天:bbs_auth=账号A的值; bbs_csrf=账号A的值|LOL:bbs_auth=账号B的值; bbs_csrf=账号B的值
@@ -54,4 +54,4 @@ mode=fixed
 - `9nb-checkin.js`：签到脚本及 Cookie 自动捕获
 - `9NB_Checkin.plugin`：Loon 定时任务、捕获规则和 MITM 配置
 
-版本：`2026-09-15.r2.12.0`
+版本：`2026-09-15.r2.13.0`
