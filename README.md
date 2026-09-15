@@ -9,6 +9,7 @@ Loon / Quantumult X / Surge 签到与定时脚本合集。
 - [lottery-query](lottery-query/) — 多彩票开奖查询。
 - [gemini-web2api](gemini-web2api/) — Gemini 网页端反代 OpenAI API 的小鸡部署套件。R1.8.1，gw.sh 菜单式一键管理（主控/出口/代理池/体检），含健康巡检插件。
 - [qq-group-guard](qq-group-guard/) — QQ 群名片守卫。R1.0.4，OneBot v11 定时巡检群名片，宽容模式（观察期 + @提醒 + 多轮确认 + 比例熔断）分级踢人，含 Loon 插件与一键安装脚本。
+- [9nb-checkin](9nb-checkin/) — 9NB.DE 多账号自动登录签到。默认每天 08:00，账号去重、账号间随机等待 0～5 分钟，显示签到奖励和积分余额。
 
 ## 使用
 
