@@ -1,11 +1,11 @@
 /*
  * 9NB.DE 多账号自动登录签到
- * 版本: 2026-09-15.r2.5.0
+ * 版本: 2026-09-15.r2.6.0
  * 默认每天 08:00 执行；账号去重；账号间随机等待 0-5 分钟。
  * 账号密码仅用于 Loon 本地登录，不会上传或输出密码。
  */
 
-const SCRIPT_VERSION = "2026-09-15.r2.5.0";
+const SCRIPT_VERSION = "2026-09-15.r2.6.0";
 const NAME = "9NB签到";
 const BASE = "https://9nb.de";
 const STORE_KEY = "9nb_checkin_accounts";
@@ -116,10 +116,12 @@ async function login(username, password) {
   if (!csrf) throw new Error("登录页未找到CSRF");
   const initialCookie = mergeCookies(first.headers, "");
   const body = `_csrf=${encodeURIComponent(csrf)}&username=${encodeURIComponent(username)}&password=${encodeURIComponent(password)}`;
-  const response = await requestResponse("POST", BASE + "/login", initialCookie, body);
+  const response = await requestResponse("POST", BASE + "/login", initialCookie, body, false);
   const cookie = mergeCookies(response.headers, initialCookie);
   if (!cookie || !/bbs_auth=/.test(cookie)) {
-    throw new Error("登录失败或未获得登录Cookie");
+    const detail = stripHtml(response.body).replace(/\s+/g, " ").trim();
+    if (/form_error|用户名|密码|错误|失败/.test(detail)) throw new Error(`登录被站点拒绝${response.status ? "（HTTP " + response.status + "）" : ""}`);
+    throw new Error(`登录响应未返回Cookie${response.status ? "（HTTP " + response.status + "）" : ""}`);
   }
   const verify = await request("GET", BASE + "/nb_checkin", cookie);
   if (isLoginPage(verify)) throw new Error("账号密码不正确或登录被拒绝");
@@ -164,11 +166,12 @@ function randomInt(a, b) { return Math.floor(Math.random() * (b - a + 1)) + a; }
 function sleep(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
 function finish(title, body, bad) { console.log((bad ? "❌ " : "✅ ") + title + "：\n" + body); if (typeof $notification !== "undefined") $notification.post(NAME, title, body); }
 function request(method, url, cookie, body) { return requestResponse(method, url, cookie, body).then(x => x.body); }
-function requestResponse(method, url, cookie, body) {
+function requestResponse(method, url, cookie, body, followRedirect = true) {
   return new Promise((resolve, reject) => {
-    const headers = {"User-Agent": UA, "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8", "Referer": BASE + "/nb_checkin", "Cookie": cookie || "", "Content-Type": "application/x-www-form-urlencoded"};
+    const headers = {"User-Agent": UA, "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8", "Referer": method === "POST" && /\/login$/.test(url) ? BASE + "/login" : BASE + "/nb_checkin", "Origin": BASE, "Cookie": cookie || "", "Content-Type": "application/x-www-form-urlencoded"};
     const opts = {url, headers, body};
-    const cb = (err, resp, data) => err ? reject(err) : resolve({body: data || "", headers: resp && resp.headers ? resp.headers : {}, status: resp && resp.status ? resp.status : 0});
+    if (followRedirect === false) opts.followRedirect = false;
+    const cb = (err, resp, data) => err ? reject(err) : resolve({body: data || "", headers: resp && resp.headers ? resp.headers : {}, status: resp && (resp.status || resp.statusCode) ? (resp.status || resp.statusCode) : 0});
     if (typeof $httpClient !== "undefined") return method === "GET" ? $httpClient.get(opts, cb) : $httpClient.post(opts, cb);
     if (typeof $task !== "undefined") return $task.fetch({url, method, headers, body}).then(r => resolve({body: r.body || "", headers: r.headers || {}, status: r.statusCode || 0})).catch(reject);
     reject(new Error("不支持的脚本环境"));
