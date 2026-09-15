@@ -11,7 +11,7 @@ accounts = input,"",tag=多账号登录,desc=格式：账号1:密码1|账号2:�
 
 [Script]
 http-request ^https:\/\/9nb\.de\/nb_checkin(?:[/?]|$) script-path=https://raw.githubusercontent.com/onshine/ScriptHubs/main/9nb-checkin/9nb-checkin.js, timeout=30, tag=9NB捕获Cookie
-cron {cron} script-path=https://raw.githubusercontent.com/onshine/ScriptHubs/main/9nb-checkin/9nb-checkin.js, timeout=600, argument=[{"accounts":"{accounts}"}], tag=9NB每日签到
+cron {cron} script-path=https://raw.githubusercontent.com/onshine/ScriptHubs/main/9nb-checkin/9nb-checkin.js, timeout=1200, argument=[{"accounts":"{accounts}"}], tag=9NB每日签到
 
 [MITM]
 hostname = %APPEND% 9nb.de
