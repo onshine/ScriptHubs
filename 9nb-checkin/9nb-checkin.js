@@ -1,11 +1,11 @@
 /*
  * 9NB.DE 多账号自动登录签到
- * 版本: 2026-09-15.r2.11.0
+ * 版本: 2026-09-15.r2.12.0
  * 默认每天 08:00 执行；账号去重；账号间随机等待 0-5 分钟。
  * 账号密码仅用于 Loon 本地登录，不会上传或输出密码。
  */
 
-const SCRIPT_VERSION = "2026-09-15.r2.11.0";
+const SCRIPT_VERSION = "2026-09-15.r2.12.0"
 const NAME = "9NB签到";
 const BASE = "https://9nb.de";
 const STORE_KEY = "9nb_checkin_browser_cookies";
@@ -64,19 +64,18 @@ function readArgument() {
 
 function loadAccounts(raw) {
   const saved = typeof $persistentStore !== "undefined" ? parseJSON($persistentStore.read(STORE_KEY), {}) : {};
+  const savedList = Object.keys(saved).map(k => saved[k]).filter(x => x && x.cookie);
   const list = [];
-  // 无Argument时直接读取捕获到的全部浏览器账号Cookie。
-  if (!raw && Object.keys(saved).length) {
-    Object.keys(saved).forEach(key => { const x = saved[key]; if (x && x.cookie) list.push({username: x.username || key, cookie: x.cookie}); });
-  }
-  // Argument格式：账号名:完整Cookie|账号名:完整Cookie；也兼容每行一个Cookie。
+  // Argument留空：直接读取Loon之前自动捕获的全部Cookie。
+  if (!raw) savedList.forEach((x, i) => list.push({username: x.username || `账号${i + 1}`, cookie: x.cookie}));
+  // Argument可填账号:密码，也可填账号:完整Cookie。
   if (raw) raw.split(/[|\n]+/).map(x => x.trim()).filter(Boolean).forEach((item, index) => {
     const p = item.indexOf(":");
-    const hasCookie = /(?:^|[; ]+)bbs_auth=/.test(item);
-    const username = hasCookie ? `账号${index + 1}` : (p > 0 ? item.slice(0, p).trim() : "");
-    const cookie = hasCookie ? item : (p > 0 ? item.slice(p + 1).trim() : "");
-    if (!username || !/bbs_auth=/.test(cookie) || list.some(x => x.username === username)) return;
-    list.push({username, cookie});
+    if (p <= 0) return;
+    const username = item.slice(0, p).trim();
+    const value = item.slice(p + 1).trim();
+    const cookie = /(?:^|[; ]+)bbs_auth=/.test(value) ? value : (savedList[index] && savedList[index].cookie) || "";
+    if (username && cookie) list.push({username, cookie});
   });
   const unique = new Set();
   return list.filter(x => { if (!x.cookie || unique.has(x.cookie)) return false; unique.add(x.cookie); return true; });
