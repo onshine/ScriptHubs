@@ -1,11 +1,11 @@
 /*
  * 9NB.DE 多账号自动登录签到
- * 版本: 2026-09-15.r2.10.0
+ * 版本: 2026-09-15.r2.11.0
  * 默认每天 08:00 执行；账号去重；账号间随机等待 0-5 分钟。
  * 账号密码仅用于 Loon 本地登录，不会上传或输出密码。
  */
 
-const SCRIPT_VERSION = "2026-09-15.r2.10.0";
+const SCRIPT_VERSION = "2026-09-15.r2.11.0";
 const NAME = "9NB签到";
 const BASE = "https://9nb.de";
 const STORE_KEY = "9nb_checkin_browser_cookies";
@@ -65,6 +65,10 @@ function readArgument() {
 function loadAccounts(raw) {
   const saved = typeof $persistentStore !== "undefined" ? parseJSON($persistentStore.read(STORE_KEY), {}) : {};
   const list = [];
+  // 无Argument时直接读取捕获到的全部浏览器账号Cookie。
+  if (!raw && Object.keys(saved).length) {
+    Object.keys(saved).forEach(key => { const x = saved[key]; if (x && x.cookie) list.push({username: x.username || key, cookie: x.cookie}); });
+  }
   // Argument格式：账号名:完整Cookie|账号名:完整Cookie；也兼容每行一个Cookie。
   if (raw) raw.split(/[|\n]+/).map(x => x.trim()).filter(Boolean).forEach((item, index) => {
     const p = item.indexOf(":");
@@ -74,7 +78,6 @@ function loadAccounts(raw) {
     if (!username || !/bbs_auth=/.test(cookie) || list.some(x => x.username === username)) return;
     list.push({username, cookie});
   });
-  else Object.keys(saved).forEach(username => list.push({username, cookie: saved[username].cookie || ""}));
   const unique = new Set();
   return list.filter(x => { if (!x.cookie || unique.has(x.cookie)) return false; unique.add(x.cookie); return true; });
 }
@@ -143,7 +146,21 @@ function captureCookie() {
   if (!/9nb\.de\/nb_checkin(?:[/?]|$)/i.test(url)) return;
   const h = $request.headers || {};
   const cookie = h.Cookie || h.cookie || "";
-  if (cookie && /bbs_auth=/.test(cookie)) console.log("✅ 已捕获9NB登录Cookie（账号密码登录模式会优先自动登录）");
+  if (!cookie || !/bbs_auth=/.test(cookie)) return;
+  const all = typeof $persistentStore !== "undefined" ? parseJSON($persistentStore.read(STORE_KEY), {}) : {};
+  const auth = (cookie.match(/(?:^|;\s*)bbs_auth=([^;]+)/i) || [])[1];
+  if (!auth) return;
+  const key = "auth_" + auth;
+  if (!all[key]) {
+    all[key] = {username: "账号" + (Object.keys(all).length + 1), cookie, updatedAt: Date.now()};
+    if (typeof $persistentStore !== "undefined") $persistentStore.write(JSON.stringify(all), STORE_KEY);
+    console.log(`[捕获] 已保存9NB登录Cookie，当前共${Object.keys(all).length}个账号`);
+  } else {
+    all[key].cookie = cookie;
+    all[key].updatedAt = Date.now();
+    if (typeof $persistentStore !== "undefined") $persistentStore.write(JSON.stringify(all), STORE_KEY);
+    console.log(`[捕获] 已更新已有账号Cookie，当前共${Object.keys(all).length}个账号`);
+  }
 }
 function extractCsrf(html) {
   const m = String(html).match(/name=["']_csrf["'][^>]*value=["']([^"']+)/i) || String(html).match(/value=["']([^"']+)["'][^>]*name=["']_csrf/i);
