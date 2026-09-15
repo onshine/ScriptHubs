@@ -1,11 +1,11 @@
 /*
  * 9NB.DE 多账号自动登录签到
- * 版本: 2026-09-15.r2.18.0
+ * 版本: 2026-09-15.r2.19.0
  * 默认每天 08:00 执行；账号去重；账号间随机等待 0-5 分钟。
  * 账号密码仅用于 Loon 本地登录，不会上传或输出密码。
  */
 
-const SCRIPT_VERSION = "2026-09-15.r2.18.0";
+const SCRIPT_VERSION = "2026-09-15.r2.19.0";
 const NAME = "9NB签到";
 const BASE = "https://9nb.de";
 const STORE_KEY = "9nb_checkin_browser_cookies";
@@ -51,14 +51,20 @@ function readArgument() {
   // Loon 3.5 可能注入 object、JSON string、数组，个别情况下直接注入账号字符串。
   let a = typeof $argument !== "undefined" ? $argument : undefined;
   if ((a === undefined || a === null || a === "") && typeof $arguments !== "undefined") a = $arguments;
-  if (Array.isArray(a)) a = a[0];
+  if (Array.isArray(a)) {
+    const objects = a.filter(x => x && typeof x === "object");
+    a = objects.length ? Object.assign({}, ...objects) : a[0];
+  }
   if (typeof a === "string") {
     const raw = a.trim();
-    if (!raw) return "";
-    try { a = JSON.parse(raw); } catch (_) { return raw; }
-    if (Array.isArray(a)) a = a[0];
+    if (!raw) return {};
+    try { a = JSON.parse(raw); } catch (_) { return {accounts: raw}; }
+    if (Array.isArray(a)) {
+      const objects = a.filter(x => x && typeof x === "object");
+      a = objects.length ? Object.assign({}, ...objects) : (a[0] || {});
+    }
   }
-  if (typeof a === "string") return a.trim();
+  if (typeof a === "string") return {accounts: a.trim()};
   if (!a || typeof a !== "object") return "";
   const parts = [];
   for (let i = 1; i <= 5; i++) {

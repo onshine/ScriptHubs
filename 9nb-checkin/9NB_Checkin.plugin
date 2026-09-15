@@ -20,7 +20,7 @@ password5 = input,"",tag=密码5,desc=填写账号5密码
 
 [Script]
 http-request ^https:\/\/9nb\.de\/nb_checkin(?:[/?]|$) script-path=https://raw.githubusercontent.com/onshine/ScriptHubs/main/9nb-checkin/9nb-checkin.js, timeout=30, tag=9NB捕获Cookie
-cron {cron} script-path=https://raw.githubusercontent.com/onshine/ScriptHubs/main/9nb-checkin/9nb-checkin.js, timeout=1200, argument=[{"account1":"{account1}","password1":"{password1}","account2":"{account2}","password2":"{password2}","account3":"{account3}","password3":"{password3}","account4":"{account4}","password4":"{password4}","account5":"{account5}","password5":"{password5}"}], tag=9NB每日签到
+cron {cron} script-path=https://raw.githubusercontent.com/onshine/ScriptHubs/main/9nb-checkin/9nb-checkin.js, timeout=1200, argument={"account1":"{account1}","password1":"{password1}","account2":"{account2}","password2":"{password2}","account3":"{account3}","password3":"{password3}","account4":"{account4}","password4":"{password4}","account5":"{account5}","password5":"{password5}"}, tag=9NB每日签到
 
 [MITM]
 hostname = 9nb.de
