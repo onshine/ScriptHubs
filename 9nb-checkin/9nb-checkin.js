@@ -1,11 +1,11 @@
 /*
  * 9NB.DE 多账号自动登录签到
- * 版本: 2026-09-15.r2.13.0
+ * 版本: 2026-09-15.r2.14.0
  * 默认每天 08:00 执行；账号去重；账号间随机等待 0-5 分钟。
  * 账号密码仅用于 Loon 本地登录，不会上传或输出密码。
  */
 
-const SCRIPT_VERSION = "2026-09-15.r2.13.0";
+const SCRIPT_VERSION = "2026-09-15.r2.14.0";
 const NAME = "9NB签到";
 const BASE = "https://9nb.de";
 const STORE_KEY = "9nb_checkin_browser_cookies";
@@ -146,6 +146,7 @@ function captureCookie() {
   const h = $request.headers || {};
   const cookie = h.Cookie || h.cookie || "";
   if (!cookie || !/bbs_auth=/.test(cookie)) return;
+  console.log(`[捕获] 检测到登录Cookie：${cookieNames(cookie)}，准备保存`);
   const all = typeof $persistentStore !== "undefined" ? parseJSON($persistentStore.read(STORE_KEY), {}) : {};
   const auth = (cookie.match(/(?:^|;\s*)bbs_auth=([^;]+)/i) || [])[1];
   if (!auth) return;
