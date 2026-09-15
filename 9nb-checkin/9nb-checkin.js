@@ -1,11 +1,11 @@
 /*
  * 9NB.DE 多账号自动登录签到
- * 版本: 2026-09-15.r2.14.0
+ * 版本: 2026-09-15.r2.15.0
  * 默认每天 08:00 执行；账号去重；账号间随机等待 0-5 分钟。
  * 账号密码仅用于 Loon 本地登录，不会上传或输出密码。
  */
 
-const SCRIPT_VERSION = "2026-09-15.r2.14.0";
+const SCRIPT_VERSION = "2026-09-15.r2.15.0";
 const NAME = "9NB签到";
 const BASE = "https://9nb.de";
 const STORE_KEY = "9nb_checkin_browser_cookies";
@@ -16,7 +16,7 @@ const UA = "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/6
     if (typeof $request !== "undefined" && $request) return captureCookie();
     const input = readArgument();
     const accounts = loadAccounts(input);
-    if (!accounts.length) throw new Error("未读取到Cookie。请在Loon中打开 https://9nb.de/ 并登录，再打开 https://9nb.de/nb_checkin；或在Argument填写：账号:bbs_auth=...; bbs_csrf=...|账号:bbs_auth=...");
+    if (!accounts.length) throw new Error("未读取到账号。请在Argument填写：账号:密码|账号:密码；例如：武则天:密码|LOL:密码");
     const results = [];
     for (let i = 0; i < accounts.length; i++) {
       console.log(`账号${i + 1}（${accounts[i].username}）开始处理`);
@@ -64,41 +64,53 @@ function readArgument() {
 
 function loadAccounts(raw) {
   const saved = typeof $persistentStore !== "undefined" ? parseJSON($persistentStore.read(STORE_KEY), {}) : {};
-  const savedList = Object.keys(saved).map(k => saved[k]).filter(x => x && x.cookie);
   const list = [];
-  // Argument留空：直接读取Loon之前自动捕获的全部Cookie。
-  if (!raw) savedList.forEach((x, i) => list.push({username: x.username || `账号${i + 1}`, cookie: x.cookie}));
-  // Argument可填账号:密码，也可填账号:完整Cookie。
-  if (raw) raw.split(/[|\n]+/).map(x => x.trim()).filter(Boolean).forEach((item, index) => {
+  if (!raw) Object.keys(saved).forEach((key, i) => { const x = saved[key]; if (x && x.cookie) list.push({username: x.username || `账号${i + 1}`, cookie: x.cookie, password: ""}); });
+  if (raw) raw.split(/[|\n]+/).map(x => x.trim()).filter(Boolean).forEach(item => {
     const p = item.indexOf(":");
     if (p <= 0) return;
     const username = item.slice(0, p).trim();
     const value = item.slice(p + 1).trim();
-    const cookie = /(?:^|[; ]+)bbs_auth=/.test(value) ? value : (savedList[index] && savedList[index].cookie) || "";
-    if (username && cookie) list.push({username, cookie});
+    if (!username || list.some(x => x.username === username)) return;
+    if (/(?:^|[; ]+)bbs_auth=/.test(value)) list.push({username, cookie: value, password: ""});
+    else list.push({username, cookie: saved[username] && saved[username].cookie || "", password: value});
   });
-  const unique = new Set();
-  return list.filter(x => { if (!x.cookie || unique.has(x.cookie)) return false; unique.add(x.cookie); return true; });
+  const seen = new Set();
+  return list.filter(x => { const key = x.username + "\u001f" + (x.cookie || ""); if (seen.has(key)) return false; seen.add(key); return true; });
 }
 
 async function runAccount(account) {
   let cookie = account.cookie || "";
   console.log(`[${account.username}] 准备登录，已有Cookie=${cookie ? "是" : "否"}`);
-  if (!cookie) throw new Error("没有浏览器Cookie，请先登录后进入签到页完成捕获");
-  console.log(`[${account.username}] 使用浏览器Cookie：${cookieNames(cookie)}`);
+  if (!cookie && account.password) {
+    console.log(`[${account.username}] 无本地Cookie，开始模拟登录`);
+    cookie = await login(account.username, account.password);
+    saveAccount(account.username, cookie);
+    console.log(`[${account.username}] 模拟登录成功，Cookie已保存`);
+  }
+  if (!cookie) throw new Error("没有Cookie且未提供密码");
+  console.log(`[${account.username}] 使用Cookie：${cookieNames(cookie)}`);
   console.log(`[${account.username}] GET /nb_checkin 验证登录状态`);
   let page = await request("GET", BASE + "/nb_checkin", cookie);
   console.log(`[${account.username}] 签到页登录状态=${isLoginPage(page) ? "未登录" : "已登录"}`);
-  if (isLoginPage(page)) throw new Error("浏览器Cookie已失效，请重新登录该账号并再次打开签到页");
+  if (isLoginPage(page)) {
+    if (!account.password) throw new Error("Cookie已失效，请重新登录该账号并再次打开签到页");
+    console.log(`[${account.username}] Cookie失效，使用Argument密码重新登录`);
+    cookie = await login(account.username, account.password);
+    saveAccount(account.username, cookie);
+    page = await request("GET", BASE + "/nb_checkin", cookie);
+  }
+  if (isLoginPage(page)) throw new Error("登录后验证仍失败，请检查账号密码");
   const beforeBalance = extractBalance(page);
   const buttons = checkinButtons(page);
   console.log(`[${account.username}] 签到按钮：${buttons || "今日已签到或页面未提供按钮"}`);
   const csrf = extractCsrf(page);
-  if (!csrf) throw new Error("未找到签到CSRF");
+  if (!/今日已签到|今日已经签到|已完成签到/.test(page) && !csrf) throw new Error("签到页未找到动态CSRF");
   let message = "今天已经签到";
   let reward = "无（已签到）";
   if (!/今日已签到|今日已经签到|已完成签到/.test(page)) {
-    const result = await request("POST", BASE + "/nb_checkin", cookie, `_csrf=${encodeURIComponent(csrf)}&mode=fixed`);
+    console.log(`[${account.username}] 执行试试手气签到 mode=random`);
+    const result = await request("POST", BASE + "/nb_checkin", cookie, `_csrf=${encodeURIComponent(csrf)}&mode=random`);
     const text = stripHtml(result).replace(/\s+/g, " ").trim();
     if (isLoginPage(text)) throw new Error("Cookie已失效");
     if (/错误|失败|异常/.test(text) && !/签到成功/.test(text)) throw new Error(text.slice(0, 120));
