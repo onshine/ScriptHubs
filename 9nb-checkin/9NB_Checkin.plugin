@@ -1,5 +1,5 @@
 #!name=9NB.DE每日签到
-#!desc=9NB.DE论坛多账号自动登录签到。默认08:00执行，账号去重，账号之间随机等待0-5分钟；显示签到奖励和积分余额。
+#!desc=9NB.DE论坛多账号浏览器Cookie签到。首次每个账号登录并进入签到页，之后自动签到；显示奖励和积分余额。
 #!author=Minis
 #!homepage=https://github.com/onshine/ScriptHubs/tree/main/9nb-checkin
 #!icon=https://9nb.de/favicon.ico
@@ -7,7 +7,7 @@
 
 [Argument]
 cron = input,"0 8 * * *",tag=签到时间,desc=默认每天08:00执行，可按需修改
-accounts = input,"",tag=多账号登录,desc=格式：账号1:密码1|账号2:密码2；密码只在Loon本地使用并存储Cookie，不要提交到GitHub
+accounts = input,"",tag=多账号Cookie,desc=格式：账号1:完整Cookie|账号2:完整Cookie；每个账号先登录浏览器并进入签到页，由Loon抓取Cookie后填写
 
 [Script]
 http-request ^https:\/\/9nb\.de\/nb_checkin(?:[/?]|$) script-path=https://raw.githubusercontent.com/onshine/ScriptHubs/main/9nb-checkin/9nb-checkin.js, timeout=30, tag=9NB捕获Cookie

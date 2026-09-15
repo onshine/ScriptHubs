@@ -1,6 +1,6 @@
 # 9NB.DE 每日签到
 
-Loon 每日自动签到脚本，适用于 https://9nb.de/。脚本通过账号密码登录，自动获取并在 Loon 本地保存 Cookie，然后签到并显示签到奖励和积分余额。
+Loon 每日自动签到脚本，适用于 https://9nb.de/。采用浏览器登录后捕获Cookie的稳定方案：每个账号首次登录并进入签到页，由Loon保存Cookie，之后脚本自动签到并显示奖励和积分余额。
 
 ## 安装
 
@@ -9,19 +9,19 @@ Loon 每日自动签到脚本，适用于 https://9nb.de/。脚本通过账号�
 首次使用：
 
 1. 导入插件并保持默认每天 08:00 执行。
-2. 在插件 Argument 的 `多账号登录` 中填写账号密码：
+2. 开启Loon的HTTPS解密和MITM，打开第一个账号的 `https://9nb.de/` 并登录。
+3. 登录成功后进入 `https://9nb.de/nb_checkin`，让Loon捕获该账号的完整Cookie。
+4. 退出该账号，再登录下一个账号并重复第2～3步。
+5. 把每个账号捕获到的完整Cookie填写到插件 Argument 的 `多账号Cookie`：
 
 ```text
-账号A:密码A|账号B:密码B
+武则天:bbs_auth=账号A的值; bbs_csrf=账号A的值|LOL:bbs_auth=账号B的值; bbs_csrf=账号B的值
 ```
 
-3. 手动运行一次 `9NB每日签到` 测试。
-4. 脚本先读取 Loon 本地保存的 Cookie；Cookie 不存在或失效时，才使用账号密码登录并更新本地 Cookie。
-5. 每个账号动态获取 CSRF 后签到，账号之间随机等待 0～300 秒。
+6. 手动运行一次 `9NB每日签到` 测试。
+7. 后续脚本只使用Cookie，不再提交账号密码；相同Cookie自动去重，账号之间随机等待0～300秒。
 
-密码只用于 Loon 本地请求，不会输出到日志、通知或 GitHub。登录得到的 Cookie 保存在 Loon 持久化存储中。
-
-相同账号自动去重，不会重复登录或重复签到。
+Cookie属于登录凭据，不要发给他人，也不要提交到GitHub。Cookie失效后，只需重新登录对应账号并更新该账号Cookie。
 
 ## 签到结果
 
@@ -54,4 +54,4 @@ mode=fixed
 - `9nb-checkin.js`：签到脚本及 Cookie 自动捕获
 - `9NB_Checkin.plugin`：Loon 定时任务、捕获规则和 MITM 配置
 
-版本：`2026-09-15.r2.8.0`
+版本：`2026-09-15.r2.9.0`
