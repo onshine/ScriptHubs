@@ -38,7 +38,16 @@ const UA = "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/6
 })().finally(() => { if (typeof $done === "function") $done(); });
 
 function readArgument() {
-  const a = typeof $argument !== "undefined" && $argument ? $argument : {};
+  let a = typeof $argument !== "undefined" && $argument ? $argument : {};
+  // Loon 不同版本对 Argument 的注入形式不同：可能是对象，也可能是 JSON 字符串。
+  if (typeof a === "string") {
+    const raw = a.trim();
+    try { a = JSON.parse(raw); } catch (_) {
+      // 兼容直接传入「账号:密码|账号:密码」的情况
+      return raw;
+    }
+  }
+  if (!a || typeof a !== "object") return "";
   return String(a.accounts || a.account || a.cookies || a.cookie || "").trim();
 }
 
