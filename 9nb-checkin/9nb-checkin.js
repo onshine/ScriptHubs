@@ -1,11 +1,11 @@
 /*
  * 9NB.DE 多账号自动登录签到
- * 版本: 2026-09-15.r2.15.0
+ * 版本: 2026-09-15.r2.16.0
  * 默认每天 08:00 执行；账号去重；账号间随机等待 0-5 分钟。
  * 账号密码仅用于 Loon 本地登录，不会上传或输出密码。
  */
 
-const SCRIPT_VERSION = "2026-09-15.r2.15.0";
+const SCRIPT_VERSION = "2026-09-15.r2.16.0";
 const NAME = "9NB签到";
 const BASE = "https://9nb.de";
 const STORE_KEY = "9nb_checkin_browser_cookies";
@@ -64,16 +64,21 @@ function readArgument() {
 
 function loadAccounts(raw) {
   const saved = typeof $persistentStore !== "undefined" ? parseJSON($persistentStore.read(STORE_KEY), {}) : {};
+  const savedList = Object.keys(saved).map(k => saved[k]).filter(x => x && x.cookie);
   const list = [];
   if (!raw) Object.keys(saved).forEach((key, i) => { const x = saved[key]; if (x && x.cookie) list.push({username: x.username || `账号${i + 1}`, cookie: x.cookie, password: ""}); });
-  if (raw) raw.split(/[|\n]+/).map(x => x.trim()).filter(Boolean).forEach(item => {
+  if (raw) raw.split(/[|\n]+/).map(x => x.trim()).filter(Boolean).forEach((item, index) => {
     const p = item.indexOf(":");
     if (p <= 0) return;
     const username = item.slice(0, p).trim();
     const value = item.slice(p + 1).trim();
     if (!username || list.some(x => x.username === username)) return;
     if (/(?:^|[; ]+)bbs_auth=/.test(value)) list.push({username, cookie: value, password: ""});
-    else list.push({username, cookie: saved[username] && saved[username].cookie || "", password: value});
+    else {
+      // 捕获时可能暂存为“账号1/账号2”，Argument中的真实用户名不一定一致；按输入顺序绑定。
+      const cached = savedList[index] && savedList[index].cookie || "";
+      list.push({username, cookie: cached, password: value});
+    }
   });
   const seen = new Set();
   return list.filter(x => { const key = x.username + "\u001f" + (x.cookie || ""); if (seen.has(key)) return false; seen.add(key); return true; });
