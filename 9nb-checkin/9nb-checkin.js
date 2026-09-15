@@ -1,11 +1,11 @@
 /*
  * 9NB.DE 多账号自动登录签到
- * 版本: 2026-09-15.r2.9.0
+ * 版本: 2026-09-15.r2.10.0
  * 默认每天 08:00 执行；账号去重；账号间随机等待 0-5 分钟。
  * 账号密码仅用于 Loon 本地登录，不会上传或输出密码。
  */
 
-const SCRIPT_VERSION = "2026-09-15.r2.9.0";
+const SCRIPT_VERSION = "2026-09-15.r2.10.0";
 const NAME = "9NB签到";
 const BASE = "https://9nb.de";
 const STORE_KEY = "9nb_checkin_browser_cookies";
@@ -16,7 +16,7 @@ const UA = "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/6
     if (typeof $request !== "undefined" && $request) return captureCookie();
     const input = readArgument();
     const accounts = loadAccounts(input);
-    if (!accounts.length) throw new Error("请在Argument填写账号密码，格式：账号:密码|账号:密码");
+    if (!accounts.length) throw new Error("未读取到有效Cookie。请在Argument填写：账号:bbs_auth=...; bbs_csrf=...|账号:bbs_auth=...; bbs_csrf=...；必须包含bbs_auth");
     const results = [];
     for (let i = 0; i < accounts.length; i++) {
       console.log(`账号${i + 1}（${accounts[i].username}）开始处理`);
@@ -65,13 +65,12 @@ function readArgument() {
 function loadAccounts(raw) {
   const saved = typeof $persistentStore !== "undefined" ? parseJSON($persistentStore.read(STORE_KEY), {}) : {};
   const list = [];
-  // Argument改为：账号名:完整Cookie|账号名:完整Cookie
-  // Cookie中不含竖线，因此可安全分割；账号名只用于区分通知。
-  if (raw) raw.split("|").map(x => x.trim()).filter(Boolean).forEach(item => {
+  // Argument格式：账号名:完整Cookie|账号名:完整Cookie；也兼容每行一个Cookie。
+  if (raw) raw.split(/[|\n]+/).map(x => x.trim()).filter(Boolean).forEach((item, index) => {
     const p = item.indexOf(":");
-    if (p <= 0) return;
-    const username = item.slice(0, p).trim();
-    const cookie = item.slice(p + 1).trim();
+    const hasCookie = /(?:^|[; ]+)bbs_auth=/.test(item);
+    const username = hasCookie ? `账号${index + 1}` : (p > 0 ? item.slice(0, p).trim() : "");
+    const cookie = hasCookie ? item : (p > 0 ? item.slice(p + 1).trim() : "");
     if (!username || !/bbs_auth=/.test(cookie) || list.some(x => x.username === username)) return;
     list.push({username, cookie});
   });
