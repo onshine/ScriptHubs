@@ -1,11 +1,11 @@
 /*
  * 9NB.DE 多账号自动登录签到
- * 版本: 2026-09-15.r2.3.0
+ * 版本: 2026-09-15.r2.4.0
  * 默认每天 08:00 执行；账号去重；账号间随机等待 0-5 分钟。
  * 账号密码仅用于 Loon 本地登录，不会上传或输出密码。
  */
 
-const SCRIPT_VERSION = "2026-09-15.r2.3.0";
+const SCRIPT_VERSION = "2026-09-15.r2.4.0";
 const NAME = "9NB签到";
 const BASE = "https://9nb.de";
 const STORE_KEY = "9nb_checkin_accounts";
