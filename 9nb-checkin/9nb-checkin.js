@@ -1,11 +1,11 @@
 /*
  * 9NB.DE 多账号自动登录签到
- * 版本: 2026-09-15.r2.4.0
+ * 版本: 2026-09-15.r2.5.0
  * 默认每天 08:00 执行；账号去重；账号间随机等待 0-5 分钟。
  * 账号密码仅用于 Loon 本地登录，不会上传或输出密码。
  */
 
-const SCRIPT_VERSION = "2026-09-15.r2.4.0";
+const SCRIPT_VERSION = "2026-09-15.r2.5.0";
 const NAME = "9NB签到";
 const BASE = "https://9nb.de";
 const STORE_KEY = "9nb_checkin_accounts";
@@ -19,6 +19,7 @@ const UA = "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/6
     if (!accounts.length) throw new Error("请在Argument填写账号密码，格式：账号:密码|账号:密码");
     const results = [];
     for (let i = 0; i < accounts.length; i++) {
+      console.log(`账号${i + 1}（${accounts[i].username}）开始处理`);
       if (i > 0) {
         const wait = randomInt(0, 300);
         console.log(`账号${i + 1}将在${wait}秒后签到`);
@@ -26,9 +27,13 @@ const UA = "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/6
       }
       try {
         const r = await runAccount(accounts[i]);
-        results.push(`账号${i + 1}（${r.username}）：${r.message}；奖励：${r.reward}；余额：${r.balance}`);
+        const line = `账号${i + 1}（${r.username}）：${r.message}；奖励：${r.reward}；余额：${r.balance}`;
+        console.log(line);
+        results.push(line);
       } catch (e) {
-        results.push(`账号${i + 1}：失败 - ${e && e.message ? e.message : String(e)}`);
+        const line = `账号${i + 1}（${accounts[i].username}）：失败 - ${e && e.message ? e.message : String(e)}`;
+        console.log(line);
+        results.push(line);
       }
     }
     finish("9NB签到结果", results.join("\n"), results.some(x => /失败/.test(x)));
@@ -105,13 +110,17 @@ async function runAccount(account) {
 }
 
 async function login(username, password) {
-  const loginPage = await request("GET", BASE + "/login", "");
-  const csrf = extractCsrf(loginPage);
+  // 先保留登录页下发的 bbs_csrf，再提交登录表单；Cookie必须跨GET/POST合并。
+  const first = await requestResponse("GET", BASE + "/login", "");
+  const csrf = extractCsrf(first.body);
   if (!csrf) throw new Error("登录页未找到CSRF");
+  const initialCookie = mergeCookies(first.headers, "");
   const body = `_csrf=${encodeURIComponent(csrf)}&username=${encodeURIComponent(username)}&password=${encodeURIComponent(password)}`;
-  const response = await requestResponse("POST", BASE + "/login", "", body);
-  const cookie = mergeCookies(response.headers, "");
-  if (!cookie || !/bbs_auth=/.test(cookie)) throw new Error("登录失败或未获得登录Cookie");
+  const response = await requestResponse("POST", BASE + "/login", initialCookie, body);
+  const cookie = mergeCookies(response.headers, initialCookie);
+  if (!cookie || !/bbs_auth=/.test(cookie)) {
+    throw new Error("登录失败或未获得登录Cookie");
+  }
   const verify = await request("GET", BASE + "/nb_checkin", cookie);
   if (isLoginPage(verify)) throw new Error("账号密码不正确或登录被拒绝");
   return cookie;
@@ -144,9 +153,9 @@ function isLoginPage(text) { return /登录|用户名|密码/.test(stripHtml(tex
 function mergeCookies(headers, old) {
   const out = {};
   String(old || "").split(";").forEach(x => { const p = x.trim().split("="); if (p.length > 1) out[p[0]] = p.slice(1).join("="); });
-  let values = headers && (headers["set-cookie"] || headers["Set-Cookie"] || []);
+  let values = headers && (headers["set-cookie"] || headers["Set-Cookie"] || headers["SET-COOKIE"] || []);
   if (!Array.isArray(values)) values = [values];
-  values.forEach(v => String(v).split(/,\s*(?=[^;,=]+=[^;,]+)/).forEach(x => { const m = x.match(/^\s*([^=;]+)=([^;]*)/); if (m && m[1] !== "Path" && m[1] !== "Expires") out[m[1]] = m[2]; }));
+  values.forEach(v => String(v).split(/,\s*(?=[^;,=]+=[^;,]+)/).forEach(x => { const m = x.match(/^\s*([^=;]+)=([^;]*)/); if (m && !/^(Path|Expires|Max-Age|Domain|SameSite|Secure|HttpOnly)$/i.test(m[1])) out[m[1]] = m[2]; }));
   return Object.keys(out).map(k => `${k}=${out[k]}`).join("; ");
 }
 function stripHtml(s) { return String(s).replace(/<script[\s\S]*?<\/script>/gi, "").replace(/<style[\s\S]*?<\/style>/gi, "").replace(/<[^>]+>/g, " ").replace(/&nbsp;/g, " "); }
@@ -159,9 +168,9 @@ function requestResponse(method, url, cookie, body) {
   return new Promise((resolve, reject) => {
     const headers = {"User-Agent": UA, "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8", "Referer": BASE + "/nb_checkin", "Cookie": cookie || "", "Content-Type": "application/x-www-form-urlencoded"};
     const opts = {url, headers, body};
-    const cb = (err, resp, data) => err ? reject(err) : resolve({body: data || "", headers: resp && resp.headers ? resp.headers : {}});
+    const cb = (err, resp, data) => err ? reject(err) : resolve({body: data || "", headers: resp && resp.headers ? resp.headers : {}, status: resp && resp.status ? resp.status : 0});
     if (typeof $httpClient !== "undefined") return method === "GET" ? $httpClient.get(opts, cb) : $httpClient.post(opts, cb);
-    if (typeof $task !== "undefined") return $task.fetch({url, method, headers, body}).then(r => resolve({body: r.body || "", headers: r.headers || {}})).catch(reject);
+    if (typeof $task !== "undefined") return $task.fetch({url, method, headers, body}).then(r => resolve({body: r.body || "", headers: r.headers || {}, status: r.statusCode || 0})).catch(reject);
     reject(new Error("不支持的脚本环境"));
   });
 }
