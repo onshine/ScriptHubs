@@ -1,11 +1,11 @@
 /*
  * 9NB.DE 多账号自动登录签到
- * 版本: 2026-09-15.r2.16.0
+ * 版本: 2026-09-15.r2.17.0
  * 默认每天 08:00 执行；账号去重；账号间随机等待 0-5 分钟。
  * 账号密码仅用于 Loon 本地登录，不会上传或输出密码。
  */
 
-const SCRIPT_VERSION = "2026-09-15.r2.16.0";
+const SCRIPT_VERSION = "2026-09-15.r2.17.0";
 const NAME = "9NB签到";
 const BASE = "https://9nb.de";
 const STORE_KEY = "9nb_checkin_browser_cookies";
@@ -59,7 +59,13 @@ function readArgument() {
   }
   if (typeof a === "string") return a.trim();
   if (!a || typeof a !== "object") return "";
-  return String(a.accounts || a.account || a.cookies || a.cookie || a.value || "").trim();
+  const parts = [];
+  for (let i = 1; i <= 5; i++) {
+    const username = String(a[`account${i}`] || "").trim();
+    const password = String(a[`password${i}`] || "");
+    if (username) parts.push(username + ":" + password);
+  }
+  return (parts.join("|") || a.accounts || a.account || a.cookies || a.cookie || a.value || "").trim();
 }
 
 function loadAccounts(raw) {
@@ -70,14 +76,13 @@ function loadAccounts(raw) {
   if (raw) raw.split(/[|\n]+/).map(x => x.trim()).filter(Boolean).forEach((item, index) => {
     const p = item.indexOf(":");
     if (p <= 0) return;
-    const username = item.slice(0, p).trim();
+    const uid = item.slice(0, p).trim();
     const value = item.slice(p + 1).trim();
-    if (!username || list.some(x => x.username === username)) return;
-    if (/(?:^|[; ]+)bbs_auth=/.test(value)) list.push({username, cookie: value, password: ""});
+    if (!/^\d+$/.test(uid) || list.some(x => x.uid === uid)) return;
+    if (/(?:^|[; ]+)bbs_auth=/.test(value)) list.push({uid, username: `UID${uid}`, cookie: value, password: ""});
     else {
-      // 捕获时可能暂存为“账号1/账号2”，Argument中的真实用户名不一定一致；按输入顺序绑定。
       const cached = savedList[index] && savedList[index].cookie || "";
-      list.push({username, cookie: cached, password: value});
+      list.push({uid, username: `UID${uid}`, cookie: cached, password: value});
     }
   });
   const seen = new Set();
@@ -86,6 +91,13 @@ function loadAccounts(raw) {
 
 async function runAccount(account) {
   let cookie = account.cookie || "";
+  console.log(`[UID ${account.uid || "?"}] 通过用户资料确认账号`);
+  if (account.uid) {
+    const profile = await request("GET", `${BASE}/user/${encodeURIComponent(account.uid)}`, cookie);
+    const m = stripHtml(profile).match(/用户(?:名)?\s*([A-Za-z0-9_\-\u4e00-\u9fff]+)/);
+    if (m) account.username = m[1];
+    console.log(`[UID ${account.uid}] 账号=${account.username}`);
+  }
   console.log(`[${account.username}] 准备登录，已有Cookie=${cookie ? "是" : "否"}`);
   if (!cookie && account.password) {
     console.log(`[${account.username}] 无本地Cookie，开始模拟登录`);
