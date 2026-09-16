@@ -1,6 +1,6 @@
 # AgentRouter 签到
 
-基于原始 AgentRouter 签到逻辑，仅增加多账号之间的随机签到抖动。当前版本：r8.2。
+基于原始 AgentRouter 签到逻辑，仅增加多账号之间的随机签到抖动。当前版本：r8.3。
 
 ## Loon
 

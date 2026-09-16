@@ -1,6 +1,6 @@
 /**
  * AgentRouter · 每日登录签到，查看奖励、余额与累计消耗
- * 版本: 2026-09-12.r8.2
+ * 版本: 2026-09-12.r8.3
  * 更新: 仅增加多账号签到间随机等待0～300秒，原签到逻辑不变。
  *
  * 抓取:无需抓包，Loon 在插件设置填写账号和密码，其他平台使用 BoxJS
@@ -43,7 +43,7 @@
  */
 
 const $ = new Env("AgentRouter");
-const SCRIPT_VERSION = "2026-09-12.r8.2";
+const SCRIPT_VERSION = "2026-09-12.r8.3";
 $.log(`[INFO] 脚本版本 ${SCRIPT_VERSION}`);
 
 const USER_KEY = "agentrouter_username";
@@ -100,9 +100,13 @@ async function run() {
         }
         debug(`开始账号 ${i + 1}/${accounts.length}`);
         try {
-            results.push(await checkin(accounts[i], quotaUnit));
+            const result = await checkin(accounts[i], quotaUnit);
+            results.push(result);
+            $.log(`账号 ${i + 1}（${maskAccount(accounts[i].username)}）完成：${result.title}\n${result.content}`);
         } catch (error) {
-            results.push({ title: "❌ 运行失败", content: error.message });
+            const result = { title: "❌ 运行失败", content: error.message };
+            results.push(result);
+            $.log(`账号 ${i + 1}（${maskAccount(accounts[i].username)}）失败：${error.message}`);
         }
     }
     if (results.length === 1) {
