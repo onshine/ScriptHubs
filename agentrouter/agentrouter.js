@@ -1,6 +1,6 @@
 /**
  * AgentRouter · 每日登录签到，查看奖励、余额与累计消耗
- * 版本: 2026-09-12.r8.1
+ * 版本: 2026-09-12.r8.2
  * 更新: 仅增加多账号签到间随机等待0～300秒，原签到逻辑不变。
  *
  * 抓取:无需抓包，Loon 在插件设置填写账号和密码，其他平台使用 BoxJS
@@ -43,7 +43,7 @@
  */
 
 const $ = new Env("AgentRouter");
-const SCRIPT_VERSION = "2026-09-12.r8.1";
+const SCRIPT_VERSION = "2026-09-12.r8.2";
 $.log(`[INFO] 脚本版本 ${SCRIPT_VERSION}`);
 
 const USER_KEY = "agentrouter_username";
@@ -341,7 +341,8 @@ function Env(s) {
             );
         }
     };
-    this.done = (v = {}) => {
-        if (typeof $done !== "undefined") $done(v);
+    // Loon Tunnel 对 $done({}) 的执行结果处理不稳定，统一使用无参数完成回调。
+    this.done = () => {
+        if (typeof $done !== "undefined") $done();
     };
 }

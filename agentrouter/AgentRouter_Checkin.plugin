@@ -1,5 +1,5 @@
 #!name=AgentRouter签到
-#!desc=每日自动签到，查看奖励、余额与累计消耗；多账号间随机等待0～5分钟。
+#!desc=每日自动签到，查看奖励、余额与累计消耗；多账号间随机等待0～5分钟。版本r8.2
 #!author=773075692, MaYIHEI
 #!homepage=https://github.com/MaYIHEI/paperclip/tree/main/app/agentrouter
 #!icon=https://raw.githubusercontent.com/MaYIHEI/paperclip/refs/heads/main/app/agentrouter/icon.png
