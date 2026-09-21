@@ -3,7 +3,8 @@
 一键部署 **workbuddy2api**（上游网关）与 **workbuddy-manager**（管理面板），
 面向跑在 LXC/容器里的服务器、或只能用高位端口的环境。
 
-- `deploy.sh` — 部署 / 更新 / 停止 / 重启 / 状态自检 / 重置面板密码
+- `workbuddy2api.sh` — 部署 / 更新 / 停止 / 重启 / 状态自检 / 重置面板密码
+- `deploy.sh` — ⚠️ **已更名**为 `workbuddy2api.sh`；此文件保留为兼容外壳，旧命令 `./deploy.sh xxx` 仍可用
 - `net-check.sh` — 容器网络与出网排查
 - `caddy.example.conf` — 反向代理最小示例（仅反代，不含任何个人配置）
 
@@ -32,14 +33,19 @@
 ```bash
 git clone <本仓库>
 cd workbuddy2api-manager
-chmod +x deploy.sh
+chmod +x workbuddy2api.sh
 
 # 常规服务器（Docker bridge 网络正常）
-./deploy.sh
+./workbuddy2api.sh
 
 # LXC / 容器里跑 Docker，或容器出网不通（见第五节）
-NET_MODE=host ./deploy.sh
+NET_MODE=host ./workbuddy2api.sh
 ```
+
+> 📌 **主脚本已从 `deploy.sh` 更名为 `workbuddy2api.sh`**（R1.0.1）。
+> 旧命令 `./deploy.sh xxx` 仍然可用（同目录留了兼容外壳，透传到新脚本），
+> 所以**已经部署好的服务器不需要做任何事**，也不用重跑脚本。
+> 新文档统一用 `./workbuddy2api.sh`。
 
 脚本会：写上游 `config.json` → 生成两份 compose → 修正数据目录属主 →
 拉镜像 → 启动 → **端口链 + 登录接口 + 容器出网三重自检**。
@@ -60,13 +66,13 @@ Caddy 部分**脚本不碰**，照着 `caddy.example.conf` 自己加到 Caddyfil
 ### 日常命令
 
 ```bash
-./deploy.sh status           # 状态 + 端口链 + 登录链路 + 出网自检
-./deploy.sh logs             # 跟踪日志
-./deploy.sh restart          # 重启两个容器
-./deploy.sh stop             # 停止
-./deploy.sh reset-password   # 重置面板密码（随机生成）
-./deploy.sh reset-password '新密码'
-./deploy.sh                  # 再次运行 = 更新（自动停旧起新）
+./workbuddy2api.sh status           # 状态 + 端口链 + 登录链路 + 出网自检
+./workbuddy2api.sh logs             # 跟踪日志
+./workbuddy2api.sh restart          # 重启两个容器
+./workbuddy2api.sh stop             # 停止
+./workbuddy2api.sh reset-password   # 重置面板密码（随机生成）
+./workbuddy2api.sh reset-password '新密码'
+./workbuddy2api.sh                  # 再次运行 = 更新（自动停旧起新）
 ```
 
 ---
@@ -117,7 +123,7 @@ docker compose exec -it wb2api bash -c './login.sh'
 按顺序查：
 
 ```bash
-./deploy.sh status
+./workbuddy2api.sh status
 ```
 
 看自检输出：
@@ -147,7 +153,7 @@ docker exec workbuddy-manager sh -c 'curl -s http://127.0.0.1:17863/healthz'
 用 host 网络绕过：
 
 ```bash
-NET_MODE=host ./deploy.sh
+NET_MODE=host ./workbuddy2api.sh
 ```
 
 > 这是**绕过**而非修复。想根治要查宿主机侧：
@@ -164,7 +170,7 @@ NET_MODE=host ./deploy.sh
 **环境变量再改也不生效**。
 
 ```bash
-./deploy.sh reset-password '新密码'
+./workbuddy2api.sh reset-password '新密码'
 ```
 
 脚本会备份 `users.json`、用与面板一致的 PBKDF2-SHA256（26 万次迭代）
@@ -222,7 +228,8 @@ sh net-check.sh
 
 ```
 workbuddy2api-manager/
-├── deploy.sh            # 部署 / 运维脚本
+├── workbuddy2api.sh     # 部署 / 运维脚本（主脚本）
+├── deploy.sh            # 兼容外壳，透传到 workbuddy2api.sh
 ├── net-check.sh         # 网络排查
 ├── caddy.example.conf   # 反代示例（仅最小片段）
 └── README.md
@@ -245,6 +252,7 @@ workbuddy2api-manager/
 
 | 版本 | 说明 |
 |---|---|
+| R1.0.1 | 主脚本 `deploy.sh` 更名为 `workbuddy2api.sh`（脚本内容与 R1.0.0 完全一致，仅自身引用文案随之更新）。原 `deploy.sh` 保留为**兼容外壳**，透传参数到新脚本，旧命令继续可用 —— 已部署的服务器无需任何操作。README 命令示例统一改为新名。 |
 | R1.0.0 | 首个版本。`deploy.sh` 支持部署/更新/停止/重启/状态/日志/重置密码；`NET_MODE=host` 应对 LXC 里 Docker bridge 出网不通；三重自检（端口链 / 登录接口 / 容器出网）；修正面板容器内固定 7864 但映射写成同号导致的 502；修正「每次重跑都打印一个无效的面板密码」；`reset-password` 用与面板一致的 PBKDF2-SHA256 重写哈希并递增会话版本。附 `net-check.sh` 与 `caddy.example.conf`。 |
 
 仅供学习交流。
