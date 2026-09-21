@@ -1,87 +1,98 @@
-# 9NB.DE 每日签到
+# 9NB 签到
 
-Loon 每日自动签到脚本，适用于 https://9nb.de/。
+当前版本：r2.32.0。
 
-## 为什么不再用「模拟登录」
+> ⚠️ **结论：Loon 无法用于 9NB 签到。**
+> 9nb.de 位于 Cloudflare 之后，Loon 对其 MITM 解密后响应损坏，Safari 会把页面当成文件下载（表现为「下载文件 document」）。
+> 另外 Loon 的 `$httpClient` / `$task.fetch` 均强制跟随 302 重定向，导致登录接口的 `Set-Cookie: bbs_auth` 必然丢失，模拟登录不可行。
+> **请改用 VPS 方案。**
 
-9NB 的登录接口是：
+## 推荐方案：VPS 运行
 
-```text
-POST /login
-成功 → 302 跳转 /，Set-Cookie: bbs_auth=...
-失败 → 302 跳转 /form_error，Set-Cookie: __form_error=...
+服务器上直连不受上述限制，可以完整处理 302 并拿到 `bbs_auth`。
+
+### 安装
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/onshine/ScriptHubs/main/9nb-checkin/deploy_9nb.sh | sh
 ```
 
-**Loon 的 `$httpClient` 和 `$task.fetch` 都会强制跟随 302**，并且只返回最终那一跳的响应头，中间跳转的 `Set-Cookie`（也就是 `bbs_auth`）会被丢弃。
+### 配置账号（三种方式，任选）
 
-实测结果：
+**方式一：命令行保存（推荐，无需编辑代码）**
 
-| 方式 | 能否拿到 bbs_auth |
-|---|---|
-| curl `--max-redirs 0` | 能 |
-| Loon `$httpClient` | 不能 |
-| Loon `$task.fetch` | 不能 |
-
-所以本脚本改为 **MITM Cookie 捕获方案**：脚本本身不模拟登录，由你在 Loon 里正常登录一次，脚本自动存下 Cookie。
-
-## 安装
-
-导入 [`9NB_Checkin.plugin`](./9NB_Checkin.plugin)，建议保持默认每天 08:00 执行。
-
-## 首次使用（重要）
-
-1. 导入插件，保持默认每天 08:00 执行；
-2. 开启 Loon 的 HTTPS 解密，确认 MITM 域名包含 `9nb.de`（插件已自带）；
-3. 在 Loon 里打开 `https://9nb.de/` 并**正常登录**；
-4. 登录成功后随便点几个页面，日志里会出现：
-
-```text
-[捕获] 检测到登录Cookie：bbs_csrf,bbs_auth，准备保存
-[捕获] 已保存9NB登录Cookie（武则天），当前共1个账号
+```sh
+python3 /root/9nb_checkin.py --add 武则天:你的密码
+python3 /root/9nb_checkin.py --add LOL:你的密码
+python3 /root/9nb_checkin.py --add maxwin:你的密码
 ```
 
-5. 退出该账号，登录下一个账号，重复第 3～4 步；
-6. 全部账号登录完成后，手动运行一次「9NB每日签到」。
+一次加多个：
 
-## 多账号
-
-有两种方式，任选一种：
-
-**方式一（推荐）**：Argument 只填账号和密码，登录一次后脚本自动按用户名关联捕获到的 Cookie。
-
-**方式二**：Argument 直接填 Cookie
-
-```text
-武则天:bbs_auth=账号A的值; bbs_csrf=账号A的值|LOL:bbs_auth=账号B的值; bbs_csrf=账号B的值
+```sh
+python3 /root/9nb_checkin.py --add "武则天:密码1|LOL:密码2|maxwin:密码3"
 ```
 
-账号之间随机等待 0～300 秒。
+查看 / 删除：
 
-## 签到结果
-
-通知中会显示每个账号的：
-
-- 签到成功或今天已经签到
-- 签到奖励
-- 当前积分余额（网站页面能读取时显示）
-
-## 关于签到入口
-
-9NB 的签到是**首页顶栏的组件**（`.nb-checkin-entry`），
-
-```text
-/nb_checkin  → 404（不存在）
+```sh
+python3 /root/9nb_checkin.py --list
+python3 /root/9nb_checkin.py --del-account LOL
 ```
 
-脚本当前读取首页来判定签到状态与积分。若站点改版，日志里会出现「签到页未找到动态CSRF」之类的明确提示，届时按提示调整即可。
+**方式二：环境变量（适合临时测试）**
 
-## Cookie 失效
+```sh
+NINE_NB_ACCOUNTS='武则天:密码|LOL:密码' python3 /root/9nb_checkin.py
+```
 
-如果提示 Cookie 失效，重新登录一次 9NB 即可让脚本重新捕获。Cookie 和密码都属于登录凭据，不要发给他人，也不要提交到 GitHub。
+**方式三：编辑脚本**
 
-## 文件
+```sh
+vi /root/9nb_checkin.py
+```
 
-- `9nb-checkin.js`：签到脚本 + Cookie 自动捕获
-- `9NB_Checkin.plugin`：Loon 定时任务、捕获规则和 MITM 配置
+找到 `ACCOUNTS`，去掉行首的 `#` 并填入密码：
 
-版本：`2026-09-15.r2.32.0`
+```python
+ACCOUNTS = [
+    ("武则天", "你的密码"),
+    ("LOL", "你的密码"),
+]
+```
+
+⚠️ 注意：**行首的 `#` 必须删掉**，否则那一行仍是注释，脚本会认为没有账号。
+`vi` 保存要按 `Esc` 后输入 `:wq` 回车。
+
+### 使用
+
+```sh
+# 先测试登录，不签到
+python3 /root/9nb_checkin.py --dry-run
+
+# 正式签到
+python3 /root/9nb_checkin.py
+
+# 不随机等待（调试用）
+python3 /root/9nb_checkin.py --no-jitter
+```
+
+### 自动运行
+
+安装脚本已配置 crontab，每天 08:00 自动签到。查看：
+
+```sh
+crontab -l
+```
+
+## 其它说明
+
+- 账号文件 `~/.9nb_accounts` 权限 `600`，仅 root 可读
+- Cookie 缓存 `~/.9nb_cookies.json`，登录成功后复用，失效自动重新登录
+- 登录失败会解码站点返回的 `__form_error`，直接显示中文原因
+- 通知推送：编辑脚本里的 `BARK_URL` 填入 Bark 地址即可
+
+## Loon（已废弃，保留供参考）
+
+插件仅保留 cron，已移除 `[MITM]` 和 `http-request` 规则，避免破坏网页访问。
+由于 Loon 无法拿到 `bbs_auth`，此方式实际无法完成签到。

@@ -247,20 +247,120 @@ def notify(title, content):
         pass
 
 
+def parse_accounts(raw):
+    """解析 '账号:密码|账号:密码' 或每行一条。"""
+    items = []
+    for chunk in re.split(r"[|\n]", raw or ""):
+        chunk = chunk.strip()
+        if not chunk or ":" not in chunk:
+            continue
+        name, pwd = chunk.split(":", 1)
+        name, pwd = name.strip(), pwd.strip()
+        if name and pwd:
+            items.append((name, pwd))
+    return items
+
+
+ACCOUNTS_FILE = os.path.expanduser("~/.9nb_accounts")
+
+
+def load_accounts_file():
+    if not os.path.exists(ACCOUNTS_FILE):
+        return []
+    try:
+        with open(ACCOUNTS_FILE, encoding="utf-8") as f:
+            return parse_accounts(f.read())
+    except Exception:
+        return []
+
+
+def save_accounts_file(accounts):
+    d = os.path.dirname(ACCOUNTS_FILE)
+    if d and not os.path.isdir(d):
+        os.makedirs(d, exist_ok=True)
+    with open(ACCOUNTS_FILE, "w", encoding="utf-8") as f:
+        for name, pwd in accounts:
+            f.write(f"{name}:{pwd}\n")
+    os.chmod(ACCOUNTS_FILE, 0o600)
+
+
+def cmd_add(spec):
+    accounts = load_accounts_file()
+    added = parse_accounts(spec)
+    if not added:
+        print("错误：格式应为 用户名:密码")
+        return 1
+    for name, pwd in added:
+        accounts = [(u, p) for u, p in accounts if u != name]
+        accounts.append((name, pwd))
+        print(f"已保存账号：{name}")
+    save_accounts_file(accounts)
+    print(f"账号文件：{ACCOUNTS_FILE}（共 {len(accounts)} 个账号）")
+    return 0
+
+
+def cmd_list():
+    accounts = load_accounts_file()
+    if not accounts:
+        print("尚未保存任何账号")
+        return 0
+    print(f"已保存 {len(accounts)} 个账号（{ACCOUNTS_FILE}）：")
+    for i, (name, pwd) in enumerate(accounts, 1):
+        print(f"  {i}. {name}  密码长度 {len(pwd)}")
+    return 0
+
+
+def cmd_del(username):
+    accounts = load_accounts_file()
+    left = [(u, p) for u, p in accounts if u != username]
+    if len(left) == len(accounts):
+        print(f"未找到账号：{username}")
+        return 1
+    save_accounts_file(left)
+    print(f"已删除账号：{username}（剩余 {len(left)} 个）")
+    return 0
+
+
 def main():
     ap = argparse.ArgumentParser(description="9NB.DE 自动签到")
     ap.add_argument("--dry-run", action="store_true", help="只测试登录，不签到")
     ap.add_argument("--no-jitter", action="store_true", help="账号间不随机等待")
     ap.add_argument("--account", help="只处理指定账号")
+    ap.add_argument("--add", metavar="用户名:密码", help="保存一个账号到配置文件")
+    ap.add_argument("--list", action="store_true", help="列出已保存的账号")
+    ap.add_argument("--del-account", metavar="用户名", help="删除指定账号")
+    ap.add_argument("--from-env", action="store_true", help="从环境变量 NINE_NB_ACCOUNTS 读取账号")
     args = ap.parse_args()
 
-    if not ACCOUNTS:
-        print("错误：请先在脚本里填写 ACCOUNTS 列表")
+    # 管理账号，不必编辑脚本
+    if args.add:
+        return cmd_add(args.add)
+    if args.list:
+        return cmd_list()
+    if args.del_account:
+        return cmd_del(args.del_account)
+
+    # 账号来源优先级：环境变量 > 命令行参数 > 配置文件 > 脚本内 ACCOUNTS
+    accounts = []
+    if args.from_env or os.environ.get("NINE_NB_ACCOUNTS"):
+        raw = os.environ.get("NINE_NB_ACCOUNTS", "")
+        accounts = parse_accounts(raw)
+        if not accounts:
+            print("错误：环境变量 NINE_NB_ACCOUNTS 为空或格式不正确")
+            return 1
+    if not accounts:
+        accounts = load_accounts_file()
+    if not accounts:
+        accounts = [(u, p) for u, p in ACCOUNTS]
+    if not accounts:
+        print("错误：没有配置任何账号。可用以下任一方式：")
+        print("  1) python3 9nb_checkin.py --add 武则天:你的密码")
+        print("  2) NINE_NB_ACCOUNTS='武则天:密码|LOL:密码' python3 9nb_checkin.py")
+        print("  3) 编辑脚本里的 ACCOUNTS 列表（记得去掉行首的 # ）")
         return 1
 
-    accounts = ACCOUNTS
     if args.account:
-        accounts = [a for a in ACCOUNTS if a[0] == args.account]
+        accounts = [a for a in accounts if a[0] == args.account]
         if not accounts:
             print(f"错误：未找到账号 {args.account}")
             return 1
