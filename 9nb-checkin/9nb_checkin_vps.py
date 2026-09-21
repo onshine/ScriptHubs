@@ -51,8 +51,16 @@ JITTER_RANGE = (0, 300)
 # Cookie 缓存文件：登录成功后保存，避免每次都重新登录
 COOKIE_FILE = os.path.expanduser("~/.9nb_cookies.json")
 
-# 通知（可选）：填了就走 Bark 推送，留空则只打印
-BARK_URL = ""
+# 通知（可选）：留空则只打印，不发推送。
+# 推荐用环境变量配置，避免把密钥写进代码：
+#   BARK_URL           Bark 推送地址，例如 https://api.day.app/你的Key
+#   TG_BOT_TOKEN       Telegram 机器人 token
+#   TG_CHAT_ID         Telegram 接收者 chat id
+BARK_URL = os.environ.get("BARK_URL", "")
+TG_BOT_TOKEN = os.environ.get("TG_BOT_TOKEN", "")
+TG_CHAT_ID = os.environ.get("TG_CHAT_ID", "")
+# 是否每次都推送（否则仅在签到/异常时才推）
+NOTIFY_ALWAYS = os.environ.get("NOTIFY_ALWAYS", "1") not in ("0", "false", "False")
 # =============================================
 
 
@@ -292,13 +300,75 @@ def save_cookies(data):
 
 
 def notify(title, content):
-    if not BARK_URL:
-        return
+    """发送通知到 Bark 与 Telegram（配了哪个发哪个）。"""
+    sent = []
+    if BARK_URL:
+        if send_bark(title, content):
+            sent.append("Bark")
+    if TG_BOT_TOKEN and TG_CHAT_ID:
+        if send_telegram(title, content):
+            sent.append("Telegram")
+    return sent
+
+
+def send_bark(title, content):
+    base = BARK_URL.rstrip("/")
+    payload = {
+        "title": title,
+        "body": content,
+        "group": "9NB签到",
+        "icon": "https://9nb.de/favicon.ico",
+        "level": "active",
+    }
+    # 优先 POST JSON（无长度限制），失败再退回 URL 路径式。
+    for attempt in ("post", "get"):
+        try:
+            if attempt == "post":
+                req = urllib.request.Request(
+                    f"{base}",
+                    data=json.dumps(payload).encode("utf-8"),
+                    headers={"Content-Type": "application/json; charset=utf-8"},
+                    method="POST",
+                )
+            else:
+                url = f"{base}/{urllib.parse.quote(title)}/{urllib.parse.quote(content[:400])}"
+                req = urllib.request.Request(url)
+            with urllib.request.urlopen(req, timeout=15) as r:
+                body = r.read().decode("utf-8", "replace")
+            try:
+                if json.loads(body).get("code") == 200:
+                    return True
+            except Exception:
+                return True
+        except Exception:
+            continue
+    print("⚠️ Bark 推送失败（请检查 BARK_URL）")
+    return False
+
+
+def send_telegram(title, content):
+    url = f"https://api.telegram.org/bot{TG_BOT_TOKEN}/sendMessage"
+    payload = {
+        "chat_id": TG_CHAT_ID,
+        "text": f"*{title}*\n{content}",
+        "parse_mode": "Markdown",
+        "disable_web_page_preview": True,
+    }
     try:
-        url = f"{BARK_URL.rstrip('/')}/{urllib.parse.quote(title)}/{urllib.parse.quote(content)}"
-        urllib.request.urlopen(url, timeout=10)
-    except Exception:
-        pass
+        req = urllib.request.Request(
+            url,
+            data=json.dumps(payload).encode("utf-8"),
+            headers={"Content-Type": "application/json; charset=utf-8"},
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=15) as r:
+            body = json.loads(r.read().decode("utf-8", "replace"))
+        if body.get("ok"):
+            return True
+        print(f"⚠️ Telegram 推送失败：{body.get('description', body)}")
+    except Exception as e:
+        print(f"⚠️ Telegram 推送失败：{e}")
+    return False
 
 
 def parse_accounts(raw):
@@ -384,6 +454,7 @@ def main():
     ap.add_argument("--list", action="store_true", help="列出已保存的账号")
     ap.add_argument("--del-account", metavar="用户名", help="删除指定账号")
     ap.add_argument("--from-env", action="store_true", help="从环境变量 NINE_NB_ACCOUNTS 读取账号")
+    ap.add_argument("--test-notify", action="store_true", help="只测试通知推送是否配置正确")
     args = ap.parse_args()
 
     # 管理账号，不必编辑脚本
@@ -393,6 +464,13 @@ def main():
         return cmd_list()
     if args.del_account:
         return cmd_del(args.del_account)
+    if args.test_notify:
+        ch = notify("9NB签到测试", "如果你看到这条消息，说明推送配置正确。")
+        if ch:
+            print(f"✅ 推送成功：{', '.join(ch)}")
+            return 0
+        print("❌ 未发送任何推送。请检查环境变量 BARK_URL 或 TG_BOT_TOKEN + TG_CHAT_ID")
+        return 1
 
     # 账号来源优先级：环境变量 > 命令行参数 > 配置文件 > 脚本内 ACCOUNTS
     accounts = []
@@ -509,7 +587,22 @@ def main():
 
     summary = "9NB签到结果\n" + "\n".join(results)
     print("\n" + summary)
-    notify("9NB签到", "；".join(results))
+
+    # 推送内容：逐账号结果 + 汇总统计
+    ok = sum(1 for r in results if "失败" not in r)
+    total_gain = 0
+    for r in results:
+        m = re.search(r"（\+(\d+)）", r)
+        if m:
+            total_gain += int(m.group(1))
+    failed = len(results) - ok
+    head = f"✅ 成功 {ok}/{len(results)}"
+    if total_gain:
+        head += f"，共获得 {total_gain} 积分"
+    if failed:
+        head += f"，失败 {failed}"
+    push_body = head + "\n" + "\n".join(results)
+    notify("9NB签到", push_body)
     return 0 if not any("失败" in r or "❌" in r for r in results) else 1
 
 
