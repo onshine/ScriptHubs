@@ -31,7 +31,7 @@ const STATIC_EXT = /\.(?:css|js|mjs|json|map|png|jpe?g|gif|webp|avif|svg|ico|bmp
     const input = readArgument();
     const accounts = loadAccounts(input);
     console.log(`[参数] 读取到${accounts.length}个账号配置`);
-    if (!accounts.length) throw new Error("未读取到账号。请在Argument填写：账号:密码|账号:密码；例如：武则天:密码|LOL:密码");
+    if (!accounts.length) throw new Error("未读取到账号。请在Argument填写：账号:密码|账号:密码；例如：user1:密码|user2:密码");
     const results = [];
     for (let i = 0; i < accounts.length; i++) {
       console.log(`账号${i + 1}（${accounts[i].username}）开始处理`);

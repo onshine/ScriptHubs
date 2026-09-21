@@ -40,9 +40,9 @@ UA = ("Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) "
 # ============ 配置区：填写你的账号 ============
 # 支持多条，格式 ("用户名", "密码")
 ACCOUNTS = [
-    # ("武则天", "你的密码"),
-    # ("LOL", "你的密码"),
-    # ("maxwin", "你的密码"),
+    # ("user1", "你的密码"),
+    # ("user2", "你的密码"),
+    # ("user3", "你的密码"),
 ]
 
 # 账号之间随机等待的秒数范围（避免同 IP 短时间多次登录）
@@ -504,8 +504,8 @@ def main():
         accounts = [(u, p) for u, p in ACCOUNTS]
     if not accounts:
         print("错误：没有配置任何账号。可用以下任一方式：")
-        print("  1) python3 9nb_checkin.py --add 武则天:你的密码")
-        print("  2) NINE_NB_ACCOUNTS='武则天:密码|LOL:密码' python3 9nb_checkin.py")
+        print("  1) python3 9nb_checkin.py --add user1:你的密码")
+        print("  2) NINE_NB_ACCOUNTS='user1:密码|user2:密码' python3 9nb_checkin.py")
         print("  3) 编辑脚本里的 ACCOUNTS 列表（记得去掉行首的 # ）")
         return 1
 

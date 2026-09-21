@@ -7,7 +7,7 @@
 
 [Argument]
 cron = 5 8 * * *
-account1 = 武则天
+account1 = user1
 password1 = bbs_auth=在这里粘贴你的Cookie
 account2 =
 password2 =
