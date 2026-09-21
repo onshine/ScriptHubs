@@ -255,6 +255,7 @@ def checkin(op, username, cookie, verbose=True):
         return None, "签到页未找到 CSRF，无法提交"
 
     # 实测签到表单：POST /nb_checkin  _csrf=<token>  mode=random|fixed
+    # 服务器返回 302（空 body），所以奖励金额改由调用方用积分差值回填。
     body = urllib.parse.urlencode({"_csrf": csrf, "mode": CHECKIN_MODE})
     st, hd, resp = raw_request(op, BASE + CHECKIN_PATH, "POST", cookie, body, BASE + CHECKIN_PATH)
     text = re.sub(r"<[^>]+>", " ", resp)
@@ -264,8 +265,11 @@ def checkin(op, username, cookie, verbose=True):
         return None, f"签到失败：{text[:120]}"
     reward = extract_reward(text)
     if verbose:
-        print(f"[{username}] 签到响应：{text[:150]}")
-    return {"message": "签到成功", "reward": reward or "已签到", "points": extract_points(text)}, ""
+        if text:
+            print(f"[{username}] 签到响应：{text[:150]}")
+        else:
+            print(f"[{username}] 签到已提交（HTTP={st}），以积分变化为准")
+    return {"message": "签到成功", "reward": reward, "points": extract_points(text)}, ""
 
 
 def load_cookies():
@@ -483,16 +487,22 @@ def main():
 
         # 积分对比：只有真的变了才算签到生效。
         delta = ""
+        reward = res.get("reward") or ""
         if before.isdigit() and after.isdigit():
             d = int(after) - int(before)
             if d > 0:
-                delta = f"（+{d}，{before}→{after}）"
+                delta = f"（+{d}）"
+                if not reward:
+                    reward = f"{d}积分"
             elif res["message"] == "今天已经签到":
-                delta = f"（{after}，未变化）"
+                delta = ""
+                if not reward:
+                    reward = "无（已签到）"
             else:
-                delta = f"（{before}→{after}，未增加 ⚠️）"
+                delta = "（未增加 ⚠️）"
 
-        line = (f"{username}：{res['message']}；奖励：{res['reward']}；"
+        line = (f"{username}：{res['message']}；"
+                f"奖励：{reward or '未知'}；"
                 f"积分：{after or before or '未知'}{delta}")
         print(f"✅ {line}")
         results.append(line)
