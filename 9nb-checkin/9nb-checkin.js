@@ -15,9 +15,9 @@ const CHECKIN_PATH = "/nb_checkin";
 // random=试试手气(1~15分)，fixed=直接签到(+5分)
 const CHECKIN_MODE = "random";
 // 脚本自身请求是否强制直连（绕开 MITM）。
-// 默认 false：走 MITM，使 http-response 规则能拦截脚本发起的 302 并读到 bbs_auth。
-// 若总是报 "certificate verify failed"，把它改成 true（此时必须已有捕获的 Cookie）。
-const USE_DIRECT = false;
+// 必须为 true：Loon 的脚本请求无法通过自己 MITM 的域名（certificate verify failed）。
+// 因此 9NB 插件【不能】把 9nb.de 加进 MITM，Cookie 需手动填写或由外部同步。
+const USE_DIRECT = true;
 const UA = "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 Mobile/15E148 Safari/604.1";
 // 静态资源后缀：捕获脚本必须立即放行，绝不参与处理，否则会破坏响应导致浏览器下载文件。
 const STATIC_EXT = /\.(?:css|js|mjs|json|map|png|jpe?g|gif|webp|avif|svg|ico|bmp|woff2?|ttf|otf|eot|mp3|mp4|webm|ogg|wav|pdf|zip|gz|rar|7z|txt|xml)(?:$|[?#])/i;
@@ -314,7 +314,16 @@ function extractBalance(html) {
   const m = text.match(/(?:积分|points?)\s*[:：]?\s*(\d[\d,]*)/i) || text.match(/积分\s*(\d[\d,]*)/);
   return m ? m[1] + "积分" : "";
 }
-function isLoginPage(text) { return /登录|用户名|密码/.test(stripHtml(text)) && !/今日还未签到|累计签到|签到成功/.test(stripHtml(text)); }
+function isLoginPage(text) {
+  // 注意：签到页自己也有 name="_csrf"（签到表单），不能据此判断登录页。
+  // 真正的登录页特征是密码输入框或登录标题。
+  const s = String(text || "");
+  if (/name=["']password["']/i.test(s) || /type=["']password["']/i.test(s)) return true;
+  if (/<title>\s*登录/.test(s)) return true;
+  const t = stripHtml(s).replace(/\s+/g, " ");
+  if (/请登录后发帖/.test(t) && !/退出登录|今日还未签到|累计签到/.test(t)) return true;
+  return false;
+}
 function mergeCookies(headers, old) {
   const out = {};
   String(old || "").split(";").forEach(x => { const p = x.trim().split("="); if (p.length > 1) out[p[0]] = p.slice(1).join("="); });
