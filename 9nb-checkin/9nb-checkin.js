@@ -1,24 +1,26 @@
 /*
  * 9NB.DE 多账号自动登录签到
- * 版本: 2026-09-15.r2.30.0
+ * 版本: 2026-09-15.r2.31.0
  * 默认每天 08:00 执行；账号去重；账号间随机等待 0-5 分钟。
  * 账号密码仅用于 Loon 本地登录，不会上传或输出密码。
  */
 
-const SCRIPT_VERSION = "2026-09-15.r2.30.0";
+const SCRIPT_VERSION = "2026-09-15.r2.31.0";
 const NAME = "9NB签到";
 const BASE = "https://9nb.de";
 const STORE_KEY = "9nb_checkin_browser_cookies";
 // 签到入口：9NB 的签到组件挂在首页/顶栏，独立 /nb_checkin 路径实测 404。
 const CHECKIN_PATH = "/";
 const UA = "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 Mobile/15E148 Safari/604.1";
+// 静态资源后缀：捕获脚本必须立即放行，绝不参与处理，否则会破坏响应导致浏览器下载文件。
+const STATIC_EXT = /\.(?:css|js|mjs|json|map|png|jpe?g|gif|webp|avif|svg|ico|bmp|woff2?|ttf|otf|eot|mp3|mp4|webm|ogg|wav|pdf|zip|gz|rar|7z|txt|xml)(?:$|[?#])/i;
 
 (async () => {
   try {
     // 拦截触发（http-request / http-response）优先于 cron，避免误跑签到流程。
     if (typeof $request !== "undefined" && $request) return captureCookie();
     if (typeof $response !== "undefined" && $response) return captureCookie();
-    console.log(`[9NB签到] 脚本版本 ${SCRIPT_VERSION}（登录方式：302无重定向抓取）`);
+    console.log(`[9NB签到] 脚本版本 ${SCRIPT_VERSION}（MITM Cookie捕获 + 静态资源自动放行）`);
     const input = readArgument();
     const accounts = loadAccounts(input);
     console.log(`[参数] 读取到${accounts.length}个账号配置`);
@@ -226,8 +228,14 @@ function captureCookie() {
   const req = typeof $request !== "undefined" && $request ? $request : null;
   const resp = typeof $response !== "undefined" && $response ? $response : null;
   const url = String((req && req.url) || (resp && resp.url) || "");
-  // 路线A：捕获范围扩大到整个 9nb.de，不再只盯 /login 和 /nb_checkin。
+  // 只监听 9nb.de
   if (!/^https?:\/\/(?:[^/]*\.)?9nb\.de(?:\/|$)/i.test(url)) return;
+  // 关键防护：静态资源与非 HTML 响应一律立即放行，不读取、不修改，避免破坏响应体。
+  if (STATIC_EXT.test(url)) return;
+  if (resp) {
+    const ct = String(headerValue(resp.headers, "content-type") || "").toLowerCase();
+    if (ct && !/text\/html|application\/xhtml/.test(ct)) return;
+  }
   const h = (req && req.headers) || {};
   const reqCookie = h.Cookie || h.cookie || "";
   const respHeaders = (resp && resp.headers) ? resp.headers : null;

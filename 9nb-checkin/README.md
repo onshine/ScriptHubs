@@ -84,4 +84,4 @@ POST /login
 - `9nb-checkin.js`：签到脚本 + Cookie 自动捕获
 - `9NB_Checkin.plugin`：Loon 定时任务、捕获规则和 MITM 配置
 
-版本：`2026-09-15.r2.30.0`
+版本：`2026-09-15.r2.31.0`
