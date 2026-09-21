@@ -1,11 +1,11 @@
 /*
  * 9NB.DE 多账号自动登录签到
- * 版本: 2026-09-15.r2.22.0
+ * 版本: 2026-09-15.r2.23.0
  * 默认每天 08:00 执行；账号去重；账号间随机等待 0-5 分钟。
  * 账号密码仅用于 Loon 本地登录，不会上传或输出密码。
  */
 
-const SCRIPT_VERSION = "2026-09-15.r2.22.0";
+const SCRIPT_VERSION = "2026-09-15.r2.23.0";
 const NAME = "9NB签到";
 const BASE = "https://9nb.de";
 const STORE_KEY = "9nb_checkin_browser_cookies";
@@ -14,6 +14,7 @@ const UA = "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/6
 (async () => {
   try {
     if (typeof $request !== "undefined" && $request) return captureCookie();
+    console.log(`[9NB签到] 脚本版本 ${SCRIPT_VERSION}（登录方式：302无重定向抓取）`);
     const input = readArgument();
     const accounts = loadAccounts(input);
     console.log(`[参数] 读取到${accounts.length}个账号配置`);
@@ -166,7 +167,7 @@ async function login(username, password) {
   const body = `_csrf=${encodeURIComponent(csrf)}&username=${encodeURIComponent(username)}&password=${encodeURIComponent(password)}`;
   // 9NB 登录成功/失败均为 302：成功 → / ，失败 → /form_error。
   // 必须不跟随重定向，否则 Loon 会丢掉 302 那一跳的 Set-Cookie（bbs_auth）。
-  const response = await requestResponse("POST", BASE + "/login", initialCookie, body, false);
+  const response = await loginPost(BASE + "/login", initialCookie, body);
   console.log(`[${username}] 5/6 登录POST HTTP=${response.status || "未知"}，响应Cookie=${cookieHeaderNames(response.headers) || "无"}`);
   const location = headerValue(response.headers, "location");
   const errCookie = headerValue(response.headers, "set-cookie") || "";
@@ -184,7 +185,14 @@ async function login(username, password) {
   }
   console.log(`[${username}] 6/6 合并Cookie=${cookieNames(cookie) || "无"}`);
   if (!/bbs_auth=/.test(cookie)) {
-    const raw = String(response.body || "").replace(/\s+/g, " ").slice(0, 300);
+    // 兜底：Loon 若跟随了重定向，Set-Cookie 会丢失，但响应体会是登录后的首页，
+    // 首页 HTML 中存在用户名/登出入口即可判定登录实际成功。
+    const body = String(response.body || "");
+    if (/\/logout|退出登录|我的主页|个人资料/.test(body) && !/请登录后发帖/.test(body)) {
+      console.log(`[${username}] 未取到bbs_auth，但响应体已是登录态首页，改用Cookie捕获模式继续`);
+      throw new Error("登录成功但未取到Cookie：请在Loon中添加9NB的Cookie捕获脚本（MITM https://9nb.de）");
+    }
+    const raw = body.replace(/\s+/g, " ").slice(0, 300);
     console.log(`[${username}] 登录未成功，响应片段=${raw || "空"}`);
     throw new Error(`登录响应未返回Cookie${response.status ? "（HTTP " + response.status + "）" : ""}${location ? "，跳转 " + location : ""}`);
   }
@@ -316,4 +324,23 @@ function requestResponse(method, url, cookie, body, followRedirect = true) {
     if (typeof $task !== "undefined") return $task.fetch({url, method, headers, body}).then(r => resolve({body: r.body || "", headers: r.headers || {}, status: r.statusCode || 0})).catch(reject);
     reject(new Error("不支持的脚本环境"));
   });
+}
+// Loon 的 $httpClient 可能忽略 followRedirect:false，此时 302 被跟随、Set-Cookie 丢失。
+// 用 curl 风格的探测：先原样发一次，若状态变成 200 且响应像首页，则说明重定向被跟随。
+async function loginPost(url, cookie, body) {
+  const res = await requestResponse("POST", url, cookie, body, false);
+  if (res.status === 302 || res.status === 301 || res.status === 303 || res.status === 307 || res.status === 308) return res;
+  // 未拿到 302：可能是 Loon 忽略了 followRedirect，需要从响应头找回跳转信息。
+  const loc = headerValue(res.headers, "location");
+  if (loc) return res;
+  console.log(`[诊断] Loon 未返回302（实际HTTP=${res.status || "未知"}），尝试用 $task.fetch 重试`);
+  if (typeof $task !== "undefined") {
+    try {
+      const r = await $task.fetch({url, method: "POST", headers: {"User-Agent": UA, "Accept": "text/html,*/*", "Referer": BASE + "/login", "Origin": BASE, "Cookie": cookie || "", "Content-Type": "application/x-www-form-urlencoded"}, body, followRedirect: false});
+      return {body: r.body || "", headers: r.headers || {}, status: r.statusCode || 0};
+    } catch (e) {
+      console.log(`[诊断] $task.fetch 重试失败：${e && e.message ? e.message : e}`);
+    }
+  }
+  return res;
 }
