@@ -199,6 +199,143 @@ sh net-check.sh
 一次性检查：两个容器的网络归属、容器间可达性、容器出网、
 面板/网关健康状态、完整 MASQUERADE 规则。
 
+### 5.7 网关容器一直 `unhealthy`（服务其实是好的）
+
+**症状**：`docker ps` 里网关显示 `Up N hours (unhealthy)`，但实际转发一切正常
+（日志里全是 `200`、有 TTFB 和吞吐数字）。
+
+**原因**：官方镜像的 healthcheck **写死探测自身默认端口**：
+
+```bash
+# 看镜像内置的探针
+docker inspect workbuddy2api --format '{{json .Config.Healthcheck}}' | python3 -m json.tool
+# → "wget -qO- http://127.0.0.1:7863/healthz || exit 1"
+```
+
+而本脚本让网关监听的是 `GW_PORT`（默认 `17863`）。**763 ≠ 17863**，
+探针永远连不上 → 连续失败几千次。
+
+> ℹ️ 本脚本 **R1.0.2 起已在生成的 compose 里覆盖 healthcheck**，新部署不会再遇到。
+> 只有用旧版脚本部署的机器需要按下文手动补。
+
+**危害不只是"显示红色"**：告警会彻底失效 —— 永远是红的，
+将来服务**真的**挂掉时你也看不出来。
+
+**修复**（往 compose 的 `wb2api` 服务里加一段）：
+
+```yaml
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:17863/healthz || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+```
+
+⚠️ 端口要填**实际监听端口**（`WB2A_LISTEN` 里的那个，默认 17863）。
+`restart` 不生效，必须重建：
+
+```bash
+cd /opt/workbuddy/workbuddy2api && docker compose up -d --force-recreate && sleep 45 && docker ps | grep workbuddy
+```
+
+### 5.8 面板提示「当前环境无法操作 docker」
+
+**症状**：面板「一键更新」区域显示：
+
+> 当前环境无法操作 docker（宿主未安装 docker，或容器未挂载 /var/run/docker.sock）…
+
+**先别急着改 compose** —— 宿主有 docker（1Panel 必然有）时，
+真正的原因通常是**权限**，不是挂载。
+
+按顺序确认：
+
+```bash
+# ① 套接字有没有挂进面板容器
+docker inspect workbuddy-manager --format '{{range .Mounts}}{{.Source}} -> {{.Destination}}{{"\n"}}{{end}}' | grep docker.sock
+
+# ② 面板容器里跑的是哪个用户
+docker exec workbuddy-manager id
+
+# ③ 套接字的属主/属组
+stat -c "%U:%G %a" /var/run/docker.sock
+getent group docker
+
+# ④ 决定性证据：容器里能不能真的调通 docker
+docker exec workbuddy-manager docker ps
+```
+
+若 ④ 报 `permission denied while trying to connect to the Docker daemon socket`
+→ 就是**权限问题**：面板以非 root 用户（`uid=10001`）运行，
+而套接字是 `srw-rw---- root:docker(995)`，它既不是 root 也不在 `docker` 组。
+
+**修法**：给面板容器补上 `docker` 组（GID 以 `getent group docker` 实际值为准）：
+
+```yaml
+# workbuddy-manager 服务里加
+    group_add:
+      - "995"
+```
+
+```bash
+cd /opt/workbuddy/workbuddy-manager && docker compose up -d --force-recreate
+docker exec workbuddy-manager docker ps   # 应正常列出容器
+```
+
+> **🔒 但请先读第六节。**
+> 挂 `docker.sock` 等于把**宿主 root 权限**交给面板容器 —— 它能起特权容器、
+> 挂载宿主根目录。面板里存着所有账号凭据，一旦该容器被攻破，
+> 攻击者拿到的是**整台服务器**而不是几个账号。
+>
+> 「一键更新」只为省下面 5.9 那三行命令。**官方镜像作者自己的建议也是
+> 不挂**，本套件默认不生成 `group_add`，相关功能自动降级为界面提示。
+> 除非这台机器只是自用测试机，否则**建议保持现状**。
+
+### 5.9 更新上游 / 面板（不依赖面板按钮）
+
+面板「一键更新」不可用时，用宿主机命令，效果完全一样。
+
+**更新上游网关**：
+
+```bash
+cd /opt/workbuddy/workbuddy2api
+
+# 备份 —— auths/ 是账号凭据，务必确认这条成功执行
+tar czf /root/wb2api-backup-$(date +%F-%H%M).tar.gz auths/ data/ config.json
+
+# 拉新镜像 + 重建
+docker compose pull && docker compose up -d --force-recreate
+
+# 验证
+sleep 45 && docker ps | grep workbuddy && curl -s -o /dev/null -w "网关 -> %{http_code}\n" http://127.0.0.1:17863/healthz
+```
+
+**更新面板**：
+
+```bash
+cd /opt/workbuddy/workbuddy-manager
+tar czf /root/wb-manager-backup-$(date +%F-%H%M).tar.gz data/
+docker compose pull && docker compose up -d --force-recreate
+sleep 20 && docker ps | grep workbuddy
+```
+
+**三个坑**：
+
+1. **别用 `docker compose down`** —— `down` 会删容器，若 compose 里有匿名卷，
+   数据可能跟着走。`up -d --force-recreate` 足够。
+2. **更新后若账号池变空** —— 多半是 `auths/` 属主问题（网关以 10001 运行，
+   属主不对会**静默跳过**该文件，表现为"添加了但没加载"）：
+   ```bash
+   cd /opt/workbuddy/workbuddy2api && chown -R 10001:10001 auths/ && docker compose up -d --force-recreate
+   ```
+3. **更新期间面板会短暂报「上游不可用」** —— 属正常，容器起来即恢复。
+
+**更新后必查监听地址**（尤其 `NET_MODE=host`，没有网络隔离兜底）：
+
+```bash
+ss -lntp | grep 17863     # 必须是 127.0.0.1:17863，若是 0.0.0.0 则已暴露公网
+```
+
 ---
 
 ## 六、安全基线
@@ -252,6 +389,7 @@ workbuddy2api-manager/
 
 | 版本 | 说明 |
 |---|---|
+| R1.0.2 | **修正网关容器永远 `unhealthy`**：官方镜像 healthcheck 写死探测 `127.0.0.1:7863/healthz`，而本脚本让网关监听 `GW_PORT`（默认 17863），两者不一致导致连续失败（服务实际正常）。生成 compose 时覆盖为实际端口（host/bridge 两个分支都已处理）。此问题会让**告警彻底失效**（永远红 → 真挂了也看不出）。新增 README 5.7/5.8/5.9：unhealthy 修复、面板「无法操作 docker」的权限诊断（`group_add` 与风险）、不依赖面板按钮的上游/面板更新命令与三个坑。 |
 | R1.0.1 | 主脚本 `deploy.sh` 更名为 `workbuddy2api.sh`（脚本内容与 R1.0.0 完全一致，仅自身引用文案随之更新）。原 `deploy.sh` 保留为**兼容外壳**，透传参数到新脚本，旧命令继续可用 —— 已部署的服务器无需任何操作。README 命令示例统一改为新名。 |
 | R1.0.0 | 首个版本。`deploy.sh` 支持部署/更新/停止/重启/状态/日志/重置密码；`NET_MODE=host` 应对 LXC 里 Docker bridge 出网不通；三重自检（端口链 / 登录接口 / 容器出网）；修正面板容器内固定 7864 但映射写成同号导致的 502；修正「每次重跑都打印一个无效的面板密码」；`reset-password` 用与面板一致的 PBKDF2-SHA256 重写哈希并递增会话版本。附 `net-check.sh` 与 `caddy.example.conf`。 |
 

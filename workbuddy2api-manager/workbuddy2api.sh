@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# workbuddy2api + workbuddy-manager 部署 / 更新脚本 R1.0.1
+# workbuddy2api + workbuddy-manager 部署 / 更新脚本 R1.0.2
 #
 # 版本记录见同目录 README.md 末尾「版本记录」表。
 # 适用：1Panel 服务器（Docker + docker compose v2），amd64 / arm64
@@ -32,7 +32,7 @@
 #   ./workbuddy2api.sh logs                 # 跟踪日志
 set -euo pipefail
 
-SCRIPT_VERSION="R1.0.1"
+SCRIPT_VERSION="R1.0.2"
 
 # ============ CONFIG（可用环境变量覆盖） ============
 DOMAIN="${DOMAIN:-workbuddy.example.com}"
@@ -556,6 +556,17 @@ services:
       - ./auths:/app/auths
       - ./data:/app/data
       - ./config.json:/app/config.json
+    # 官方镜像的 healthcheck 写死探测 127.0.0.1:7863/healthz（见镜像 Config.
+    #   Healthcheck.Test），而本脚本让网关监听 ${GW_PORT}，两者不一致 →
+    # 容器永远 unhealthy（服务其实是好的，只是探针探错端口）。
+    # ⚠️ 危害不是"显示红色"这么简单：告警会彻底失效，将来真挂了也看不出来。
+    # 所以这里覆盖成实际监听端口。
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:${GW_PORT}/healthz || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
 EOF
 else
 sync_compose "$GW_DIR" "上游" <<EOF
@@ -577,6 +588,15 @@ services:
       - ./config.json:/app/config.json
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    # 官方镜像的 healthcheck 写死探测 127.0.0.1:7863/healthz，与本脚本设定的
+    # 容器内端口 ${GW_CTR_PORT} 不一致 → 容器永远 unhealthy（服务本身是好的）。
+    # ⚠️ 危害不是"显示红色"这么简单：告警会彻底失效，将来真挂了也看不出来。
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:${GW_CTR_PORT}/healthz || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
 EOF
 fi
 
