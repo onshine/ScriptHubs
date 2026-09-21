@@ -1,11 +1,11 @@
 /*
  * 9NB.DE 多账号自动登录签到
- * 版本: 2026-09-15.r2.21.0
+ * 版本: 2026-09-15.r2.22.0
  * 默认每天 08:00 执行；账号去重；账号间随机等待 0-5 分钟。
  * 账号密码仅用于 Loon 本地登录，不会上传或输出密码。
  */
 
-const SCRIPT_VERSION = "2026-09-15.r2.21.0";
+const SCRIPT_VERSION = "2026-09-15.r2.22.0";
 const NAME = "9NB签到";
 const BASE = "https://9nb.de";
 const STORE_KEY = "9nb_checkin_browser_cookies";
@@ -164,16 +164,29 @@ async function login(username, password) {
   const initialCookie = mergeCookies(first.headers, "");
   console.log(`[${username}] 4/6 准备POST /login，初始Cookie=${cookieNames(initialCookie) || "无"}`);
   const body = `_csrf=${encodeURIComponent(csrf)}&username=${encodeURIComponent(username)}&password=${encodeURIComponent(password)}`;
-  const response = await requestResponse("POST", BASE + "/login", initialCookie, body);
+  // 9NB 登录成功/失败均为 302：成功 → / ，失败 → /form_error。
+  // 必须不跟随重定向，否则 Loon 会丢掉 302 那一跳的 Set-Cookie（bbs_auth）。
+  const response = await requestResponse("POST", BASE + "/login", initialCookie, body, false);
   console.log(`[${username}] 5/6 登录POST HTTP=${response.status || "未知"}，响应Cookie=${cookieHeaderNames(response.headers) || "无"}`);
-  const cookie = mergeCookies(response.headers, initialCookie);
+  const location = headerValue(response.headers, "location");
+  const errCookie = headerValue(response.headers, "set-cookie") || "";
+  let cookie = mergeCookies(response.headers, initialCookie);
+  if (!/bbs_auth=/.test(cookie) && /__form_error=/.test(errCookie)) {
+    // 失败跳转会带 __form_error，其 base64 内容里是站点返回的中文原因。
+    const reason = decodeFormError(errCookie);
+    throw new Error(`登录被站点拒绝：${reason || "用户名或密码错误"}${location ? "（跳转 " + location + "）" : ""}`);
+  }
+  if (!/bbs_auth=/.test(cookie) && /form_error/.test(location)) {
+    const page = await request("GET", BASE + "/form_error", mergeCookies(response.headers, initialCookie));
+    const detail = stripHtml(page).replace(/\s+/g, " ").trim();
+    const m = detail.match(/操作失败[^。]{0,80}/);
+    throw new Error(`登录被站点拒绝：${m ? m[0].trim() : "用户名或密码错误"}`);
+  }
   console.log(`[${username}] 6/6 合并Cookie=${cookieNames(cookie) || "无"}`);
-  if (!cookie || !/bbs_auth=/.test(cookie)) {
-    const detail = stripHtml(response.body).replace(/\s+/g, " ").trim();
-    const raw = String(response.body || "").replace(/\s+/g, " ").slice(0, 500);
+  if (!/bbs_auth=/.test(cookie)) {
+    const raw = String(response.body || "").replace(/\s+/g, " ").slice(0, 300);
     console.log(`[${username}] 登录未成功，响应片段=${raw || "空"}`);
-    if (/form_error|用户名|密码|错误|失败/.test(detail)) throw new Error(`登录被站点拒绝${response.status ? "（HTTP " + response.status + "）" : ""}：${detail.slice(0, 160)}`);
-    throw new Error(`登录响应未返回Cookie${response.status ? "（HTTP " + response.status + "）" : ""}：${detail.slice(0, 160)}`);
+    throw new Error(`登录响应未返回Cookie${response.status ? "（HTTP " + response.status + "）" : ""}${location ? "，跳转 " + location : ""}`);
   }
   const verify = await request("GET", BASE + "/nb_checkin", cookie);
   if (isLoginPage(verify)) throw new Error("账号密码不正确或登录被拒绝");
@@ -252,6 +265,40 @@ function checkinButtons(html) {
 function cookieNames(cookie) { return String(cookie || "").split(";").map(x => x.trim().split("=")[0]).filter(Boolean).join(","); }
 function cookieHeaderNames(headers) {
   return cookieHeaderValues(headers).map(x => String(x).match(/^\s*([^=;]+)/)).filter(Boolean).map(x => x[1]).join(",");
+}
+function headerValue(headers, name) {
+  if (!headers) return "";
+  const key = Object.keys(headers).find(k => k.toLowerCase() === name.toLowerCase());
+  if (!key) return "";
+  const v = headers[key];
+  return String(Array.isArray(v) ? v[0] : v || "");
+}
+// 9NB 登录失败时下发 __form_error=base64({"message":"用户名或密码错误",...})
+function decodeFormError(setCookieRaw) {
+  const m = String(setCookieRaw).match(/__form_error=([^;,\s]+)/i);
+  if (!m) return "";
+  try {
+    let b64 = decodeURIComponent(m[1]);
+    // atob 返回 Latin-1 字符串，中文需按 UTF-8 字节还原。
+    let bin = "";
+    if (typeof atob === "function") bin = atob(b64);
+    else if (typeof Buffer !== "undefined") bin = Buffer.from(b64, "base64").toString("binary");
+    else return "";
+    const bytes = [];
+    for (let i = 0; i < bin.length; i++) bytes.push(bin.charCodeAt(i) & 0xff);
+    let json = "";
+    if (typeof TextDecoder !== "undefined") {
+      try { json = new TextDecoder("utf-8").decode(new Uint8Array(bytes)); } catch (_) { json = ""; }
+    }
+    if (!json) {
+      json = bytes.map(b => (b < 0x80 ? String.fromCharCode(b) : "%" + b.toString(16).padStart(2, "0"))).join("");
+      try { json = decodeURIComponent(json); } catch (_) { json = ""; }
+    }
+    const obj = JSON.parse(json);
+    return obj && obj.message ? String(obj.message) : "";
+  } catch (_) {
+    return "";
+  }
 }
 function stripHtml(s) { return String(s).replace(/<script[\s\S]*?<\/script>/gi, "").replace(/<style[\s\S]*?<\/style>/gi, "").replace(/<[^>]+>/g, " ").replace(/&nbsp;/g, " "); }
 function parseJSON(s, fallback) { try { return s ? JSON.parse(s) : fallback; } catch (_) { return fallback; } }
