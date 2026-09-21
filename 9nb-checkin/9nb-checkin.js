@@ -10,7 +10,10 @@ const NAME = "9NB签到";
 const BASE = "https://9nb.de";
 const STORE_KEY = "9nb_checkin_browser_cookies";
 // 签到入口：9NB 的签到组件挂在首页/顶栏，独立 /nb_checkin 路径实测 404。
-const CHECKIN_PATH = "/";
+// 签到入口与提交地址（实测：登录后 GET/POST /nb_checkin，未登录会 302 回 /login）
+const CHECKIN_PATH = "/nb_checkin";
+// random=试试手气(1~15分)，fixed=直接签到(+5分)
+const CHECKIN_MODE = "random";
 // 脚本自身请求是否强制直连（绕开 MITM）。
 // 默认 false：走 MITM，使 http-response 规则能拦截脚本发起的 302 并读到 bbs_auth。
 // 若总是报 "certificate verify failed"，把它改成 true（此时必须已有捕获的 Cookie）。
@@ -176,13 +179,13 @@ async function runAccount(account) {
   const buttons = checkinButtons(page);
   console.log(`[${account.username}] 签到按钮：${buttons || "今日已签到或页面未提供按钮"}`);
   const csrf = extractCsrf(page) || account.csrf || "";
-  const done = /今日已签到|今日已经签到|已完成签到|nb-checkin-entry-done/.test(page);
+  const done = /今日已签到|今日已经签到|已完成签到|nb-checkin-entry-done|明日再来/.test(page);
   let message = "今天已经签到";
   let reward = "无（已签到）";
   if (!done) {
     if (!csrf) throw new Error("签到页未找到动态CSRF，请确认已登录并可正常访问签到入口");
-    console.log(`[${account.username}] 执行试试手气签到（${CHECKIN_PATH}）`);
-    const result = await request("POST", BASE + CHECKIN_PATH, cookie, `_csrf=${encodeURIComponent(csrf)}&mode=random`);
+    console.log(`[${account.username}] 执行签到（${CHECKIN_PATH}，mode=${CHECKIN_MODE}）`);
+    const result = await request("POST", BASE + CHECKIN_PATH, cookie, `_csrf=${encodeURIComponent(csrf)}&mode=${CHECKIN_MODE}`);
     const text = stripHtml(result).replace(/\s+/g, " ").trim();
     if (isLoginPage(text)) throw new Error("Cookie已失效");
     if (/错误|失败|异常/.test(text) && !/签到成功/.test(text)) throw new Error(text.slice(0, 120));
@@ -299,7 +302,10 @@ function detectUsername(html) {
   return "";
 }
 function extractCsrf(html) {
-  const m = String(html).match(/name=["']_csrf["'][^>]*value=["']([^"']+)/i) || String(html).match(/value=["']([^"']+)["'][^>]*name=["']_csrf/i);
+  const s = String(html);
+  const m = s.match(/name=["']_csrf["'][^>]*value=["']([^"']+)/i)
+    || s.match(/value=["']([^"']+)["'][^>]*name=["']_csrf/i)
+    || s.match(/tokenValue\s*=\s*["']([^"']+)["']/i);
   return m ? m[1] : "";
 }
 function extractReward(text) { return (String(text).match(/(?:获得|奖励|积分)[^。\n]{0,30}/) || [""])[0].trim(); }

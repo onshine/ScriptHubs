@@ -31,6 +31,9 @@ import urllib.parse
 import urllib.request
 
 BASE = "https://9nb.de"
+CHECKIN_PATH = "/nb_checkin"
+# 签到模式：random=试试手气(1~15分)，fixed=直接签到(+5分)
+CHECKIN_MODE = "random"
 UA = ("Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) "
       "AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1")
 
@@ -181,24 +184,41 @@ def extract_username(text):
 
 
 def extract_points(text):
-    """抓取积分/余额。"""
+    """抓取用户积分。签到页侧栏形如：<div class="nb-checkin-drawer-rank">庶民 · 积分 200</div>"""
     patterns = [
-        r"积分[^0-9]{0,10}(\d+)",
+        r'积分\s*</?[^>]*>?\s*(\d+)',
+        r"积分\s*(\d+)",
+        r"（?积分\s*[:：]?\s*(\d+)",
         r"(\d+)\s*积分",
-        r"points?[^0-9]{0,10}(\d+)",
     ]
     for p in patterns:
-        m = re.search(p, text, re.I)
+        m = re.search(p, text)
         if m:
             return m.group(1)
     return ""
 
 
+def extract_reward(text):
+    """从签到结果页提取本次获得的积分，例如 '签到成功，获得 8 积分'。"""
+    patterns = [
+        r"获得\s*(\d+)\s*积分",
+        r"奖励\s*(\d+)\s*积分",
+        r"签到成功[^0-9]{0,20}(\d+)\s*积分",
+        r"(\d+)\s*积分",
+    ]
+    for p in patterns:
+        m = re.search(p, text)
+        if m:
+            return m.group(1) + "积分"
+    return ""
+
+
 def checkin(op, username, cookie, verbose=True):
     """访问签到入口并提交。返回结果文案。"""
-    status, headers, html = raw_request(op, BASE + "/", cookie=cookie)
+    status, headers, html = raw_request(op, BASE + CHECKIN_PATH, cookie=cookie)
     location = headers.get("Location", "") or ""
     if status in (301, 302, 303):
+        # 未登录访问 /nb_checkin 会 302 回 /login
         return None, f"Cookie 已失效（跳转 {location}），需重新登录"
     if is_login_page(html):
         return None, "Cookie 已失效，需重新登录"
@@ -207,27 +227,25 @@ def checkin(op, username, cookie, verbose=True):
     if verbose:
         print(f"[{username}] 登录态确认：{who or '已登录'}")
 
-    done = bool(re.search(r"今日已签到|今日已经签到|已完成签到|nb-checkin-entry-done", html))
+    done = bool(re.search(r"今日已签到|今日已经签到|已完成签到|nb-checkin-entry-done|明日再来", html))
     if done:
         return {"message": "今天已经签到", "reward": "无（已签到）", "points": extract_points(html)}, ""
 
-    csrf = (re.search(r'name="_csrf" value="([^"]+)"', html) or [None, ""])[1]
+    csrf = (re.search(r'name="_csrf"\s+value="([^"]+)"', html)
+            or re.search(r'tokenValue\s*=\s*"([^"]+)"', html)
+            or [None, ""])[1]
     if not csrf:
-        return None, "签到页未找到 CSRF，无法提交（可能需要先完善签到模块结构分析）"
+        return None, "签到页未找到 CSRF，无法提交"
 
-    # 签到提交：7NB 系框架用 POST + _csrf
-    body = urllib.parse.urlencode({"_csrf": csrf, "mode": "random"})
-    st, hd, resp = raw_request(op, BASE + "/", "POST", cookie, body, BASE + "/")
+    # 实测签到表单：POST /nb_checkin  _csrf=<token>  mode=random|fixed
+    body = urllib.parse.urlencode({"_csrf": csrf, "mode": CHECKIN_MODE})
+    st, hd, resp = raw_request(op, BASE + CHECKIN_PATH, "POST", cookie, body, BASE + CHECKIN_PATH)
     text = re.sub(r"<[^>]+>", " ", resp)
     text = re.sub(r"\s+", " ", text).strip()
 
     if re.search(r"错误|失败|异常", text) and "签到成功" not in text:
         return None, f"签到失败：{text[:120]}"
-
-    reward = ""
-    m = re.search(r"获得[^0-9]{0,10}(\d+)[^0-9]{0,5}(?:积分|点)", text)
-    if m:
-        reward = m.group(1) + "积分"
+    reward = extract_reward(text)
     if verbose:
         print(f"[{username}] 签到响应：{text[:150]}")
     return {"message": "签到成功", "reward": reward or "已签到", "points": extract_points(text)}, ""
@@ -415,6 +433,12 @@ def main():
             results.append(f"{username}：登录正常（{who or '用户未识别'}）" if ok else f"{username}：Cookie 无效")
             continue
 
+        # 签到前先记录积分，签到后对比，避免"假成功"。
+        before = ""
+        st, hd, page0 = raw_request(op, BASE + CHECKIN_PATH, cookie=cookie)
+        if st == 200 and not is_login_page(page0):
+            before = extract_points(page0)
+
         res, err = checkin(op, username, cookie)
         if err:
             # Cookie 失效则重新登录一次
@@ -434,7 +458,25 @@ def main():
                 results.append(line)
                 continue
 
-        line = f"{username}：{res['message']}；奖励：{res['reward']}；积分：{res['points'] or '未知'}"
+        after = res.get("points") or ""
+        if not after:
+            st, hd, page1 = raw_request(op, BASE + CHECKIN_PATH, cookie=cookie)
+            if st == 200:
+                after = extract_points(page1)
+
+        # 积分对比：只有真的变了才算签到生效。
+        delta = ""
+        if before.isdigit() and after.isdigit():
+            d = int(after) - int(before)
+            if d > 0:
+                delta = f"（+{d}，{before}→{after}）"
+            elif res["message"] == "今天已经签到":
+                delta = f"（{after}，未变化）"
+            else:
+                delta = f"（{before}→{after}，未增加 ⚠️）"
+
+        line = (f"{username}：{res['message']}；奖励：{res['reward']}；"
+                f"积分：{after or before or '未知'}{delta}")
         print(f"✅ {line}")
         results.append(line)
 
