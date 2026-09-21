@@ -1,27 +1,61 @@
 # 9NB.DE 每日签到
 
-Loon 每日自动签到脚本，适用于 https://9nb.de/。采用浏览器登录后捕获Cookie的稳定方案：每个账号首次登录并进入签到页，由Loon保存Cookie，之后脚本自动签到并显示奖励和积分余额。
+Loon 每日自动签到脚本，适用于 https://9nb.de/。
+
+## 为什么不再用「模拟登录」
+
+9NB 的登录接口是：
+
+```text
+POST /login
+成功 → 302 跳转 /，Set-Cookie: bbs_auth=...
+失败 → 302 跳转 /form_error，Set-Cookie: __form_error=...
+```
+
+**Loon 的 `$httpClient` 和 `$task.fetch` 都会强制跟随 302**，并且只返回最终那一跳的响应头，中间跳转的 `Set-Cookie`（也就是 `bbs_auth`）会被丢弃。
+
+实测结果：
+
+| 方式 | 能否拿到 bbs_auth |
+|---|---|
+| curl `--max-redirs 0` | 能 |
+| Loon `$httpClient` | 不能 |
+| Loon `$task.fetch` | 不能 |
+
+所以本脚本改为 **MITM Cookie 捕获方案**：脚本本身不模拟登录，由你在 Loon 里正常登录一次，脚本自动存下 Cookie。
 
 ## 安装
 
-导入 [`9NB_Checkin.plugin`](./9NB_Checkin.plugin)，建议保持默认每天 08:00 执行。多账号签到时，相同 Cookie 会自动去重；每个账号之间随机等待 0～5 分钟。
+导入 [`9NB_Checkin.plugin`](./9NB_Checkin.plugin)，建议保持默认每天 08:00 执行。
 
-首次使用：
+## 首次使用（重要）
 
-1. 导入插件并保持默认每天 08:00 执行。
-2. 开启Loon的HTTPS解密和MITM，确认MITM域名只填写 `9nb.de`，然后在Loon浏览器中打开 `https://9nb.de/` 并登录。
-3. 登录成功后进入 `https://9nb.de/nb_checkin`，捕获规则会自动提取 `bbs_auth` 并保存该账号Cookie。
-4. 退出该账号，再登录下一个账号并重复第2～3步。
-5. Loon捕获后会自动保存每个账号的 `bbs_auth` 和完整Cookie；如果Argument留空，脚本会自动读取所有已保存账号。也可以手动输入完整Cookie：
+1. 导入插件，保持默认每天 08:00 执行；
+2. 开启 Loon 的 HTTPS 解密，确认 MITM 域名包含 `9nb.de`（插件已自带）；
+3. 在 Loon 里打开 `https://9nb.de/` 并**正常登录**；
+4. 登录成功后随便点几个页面，日志里会出现：
+
+```text
+[捕获] 检测到登录Cookie：bbs_csrf,bbs_auth，准备保存
+[捕获] 已保存9NB登录Cookie（武则天），当前共1个账号
+```
+
+5. 退出该账号，登录下一个账号，重复第 3～4 步；
+6. 全部账号登录完成后，手动运行一次「9NB每日签到」。
+
+## 多账号
+
+有两种方式，任选一种：
+
+**方式一（推荐）**：Argument 只填账号和密码，登录一次后脚本自动按用户名关联捕获到的 Cookie。
+
+**方式二**：Argument 直接填 Cookie
 
 ```text
 武则天:bbs_auth=账号A的值; bbs_csrf=账号A的值|LOL:bbs_auth=账号B的值; bbs_csrf=账号B的值
 ```
 
-6. 手动运行一次 `9NB每日签到` 测试。
-7. 后续脚本只使用Cookie，不再提交账号密码；相同Cookie自动去重，账号之间随机等待0～300秒。
-
-Cookie属于登录凭据，不要发给他人，也不要提交到GitHub。Cookie失效后，只需重新登录对应账号并更新该账号Cookie。
+账号之间随机等待 0～300 秒。
 
 ## 签到结果
 
@@ -31,27 +65,23 @@ Cookie属于登录凭据，不要发给他人，也不要提交到GitHub。Cooki
 - 签到奖励
 - 当前积分余额（网站页面能读取时显示）
 
-Cookie 和密码都属于登录凭据，不要发给他人，也不要提交到 GitHub。
+## 关于签到入口
 
-## 工作原理
-
-签到页面每次返回动态 `_csrf`，脚本先 GET `/nb_checkin` 获取当前 CSRF，再提交：
+9NB 的签到是**首页顶栏的组件**（`.nb-checkin-entry`），
 
 ```text
-POST /nb_checkin
-_csrf=<动态值>
-mode=fixed
+/nb_checkin  → 404（不存在）
 ```
 
-`mode=fixed` 为直接签到，固定获得 5 积分；如需手气签到，可将脚本中的 `mode=fixed` 改为 `mode=random`。
+脚本当前读取首页来判定签到状态与积分。若站点改版，日志里会出现「签到页未找到动态CSRF」之类的明确提示，届时按提示调整即可。
 
 ## Cookie 失效
 
-如果通知提示 Cookie 失效，请重新登录 9NB 并再次打开签到页。不要把 Cookie 发到聊天或提交到 GitHub。
+如果提示 Cookie 失效，重新登录一次 9NB 即可让脚本重新捕获。Cookie 和密码都属于登录凭据，不要发给他人，也不要提交到 GitHub。
 
 ## 文件
 
-- `9nb-checkin.js`：签到脚本及 Cookie 自动捕获
+- `9nb-checkin.js`：签到脚本 + Cookie 自动捕获
 - `9NB_Checkin.plugin`：Loon 定时任务、捕获规则和 MITM 配置
 
-版本：`2026-09-15.r2.23.0`
+版本：`2026-09-15.r2.30.0`

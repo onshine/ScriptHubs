@@ -1,19 +1,23 @@
 /*
  * 9NB.DE 多账号自动登录签到
- * 版本: 2026-09-15.r2.23.0
+ * 版本: 2026-09-15.r2.30.0
  * 默认每天 08:00 执行；账号去重；账号间随机等待 0-5 分钟。
  * 账号密码仅用于 Loon 本地登录，不会上传或输出密码。
  */
 
-const SCRIPT_VERSION = "2026-09-15.r2.23.0";
+const SCRIPT_VERSION = "2026-09-15.r2.30.0";
 const NAME = "9NB签到";
 const BASE = "https://9nb.de";
 const STORE_KEY = "9nb_checkin_browser_cookies";
+// 签到入口：9NB 的签到组件挂在首页/顶栏，独立 /nb_checkin 路径实测 404。
+const CHECKIN_PATH = "/";
 const UA = "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 Mobile/15E148 Safari/604.1";
 
 (async () => {
   try {
+    // 拦截触发（http-request / http-response）优先于 cron，避免误跑签到流程。
     if (typeof $request !== "undefined" && $request) return captureCookie();
+    if (typeof $response !== "undefined" && $response) return captureCookie();
     console.log(`[9NB签到] 脚本版本 ${SCRIPT_VERSION}（登录方式：302无重定向抓取）`);
     const input = readArgument();
     const accounts = loadAccounts(input);
@@ -98,7 +102,7 @@ function loadAccounts(raw) {
   const saved = typeof $persistentStore !== "undefined" ? parseJSON($persistentStore.read(STORE_KEY), {}) : {};
   const savedList = Object.keys(saved).map(k => saved[k]).filter(x => x && x.cookie);
   const list = [];
-  if (!raw) Object.keys(saved).forEach((key, i) => { const x = saved[key]; if (x && x.cookie) list.push({username: x.username || `账号${i + 1}`, cookie: x.cookie, password: ""}); });
+  if (!raw) Object.keys(saved).forEach((key, i) => { const x = saved[key]; if (x && x.cookie && /bbs_auth=/.test(x.cookie)) list.push({username: x.username || `账号${i + 1}`, cookie: x.cookie, password: ""}); });
   if (raw) raw.split(/[|\n]+/).map(x => x.trim()).filter(Boolean).forEach((item, index) => {
     const p = item.indexOf(":");
     if (p <= 0) return;
@@ -106,7 +110,11 @@ function loadAccounts(raw) {
     const value = item.slice(p + 1).trim();
     if (!username || list.some(x => x.username === username)) return;
     if (/(?:^|[; ]+)bbs_auth=/.test(value)) list.push({username, cookie: value, password: ""});
-    else list.push({username, cookie: "", password: value});
+    else {
+      // Argument 提供的是密码；同时尝试匹配 MITM 捕获到的同账号 Cookie。
+      const captured = Object.keys(saved).map(k => saved[k]).find(x => x && x.cookie && x.username === username);
+      list.push({username, cookie: captured ? captured.cookie : "", password: value});
+    }
   });
   const seen = new Set();
   return list.filter(x => { const key = x.username + "\u001f" + (x.cookie || ""); if (seen.has(key)) return false; seen.add(key); return true; });
@@ -114,12 +122,18 @@ function loadAccounts(raw) {
 
 async function runAccount(account) {
   let cookie = account.cookie || "";
-  console.log(`[${account.username}] 通过Argument账号密码开始处理，忽略旧Cookie=${cookie ? "是" : "否"}`);
-  if (account.password) {
-    console.log(`[${account.username}] 使用Argument密码模拟登录`);
-    cookie = await login(account.username, account.password);
-    saveAccount(account.username, cookie);
-    console.log(`[${account.username}] 模拟登录成功，Cookie已保存`);
+  // 路线A：优先使用 MITM 捕获到的 Cookie，避免依赖 Loon 拿不到的 302 Set-Cookie。
+  if (cookie && /bbs_auth=/.test(cookie)) {
+    console.log(`[${account.username}] 使用已捕获Cookie（MITM）：${cookieNames(cookie)}`);
+  } else if (account.password) {
+    console.log(`[${account.username}] 未找到已捕获Cookie，尝试模拟登录（Loon可能丢失302 Set-Cookie）`);
+    try {
+      cookie = await login(account.username, account.password);
+      saveAccount(account.username, cookie);
+      console.log(`[${account.username}] 模拟登录成功，Cookie已保存`);
+    } catch (e) {
+      throw new Error(`无可用Cookie，且模拟登录失败：${e && e.message ? e.message : e}\n请在Loon开启MITM(9nb.de)后，手动登录一次9NB以捕获Cookie`);
+    }
   }
   if (!cookie) throw new Error("没有Cookie且未提供密码");
   console.log(`[${account.username}] 使用Cookie：${cookieNames(cookie)}`);
@@ -127,30 +141,31 @@ async function runAccount(account) {
   let page = await request("GET", BASE + "/nb_checkin", cookie);
   console.log(`[${account.username}] 签到页登录状态=${isLoginPage(page) ? "未登录" : "已登录"}`);
   if (isLoginPage(page)) {
-    if (!account.password) throw new Error("Cookie已失效，请重新登录该账号并再次打开签到页");
+    if (!account.password) throw new Error("Cookie已失效，请在Loon开启MITM后重新登录9NB以捕获Cookie");
     console.log(`[${account.username}] Cookie失效，使用Argument密码重新登录`);
     cookie = await login(account.username, account.password);
     saveAccount(account.username, cookie);
-    page = await request("GET", BASE + "/nb_checkin", cookie);
+    page = await request("GET", BASE + CHECKIN_PATH, cookie);
   }
-  if (isLoginPage(page)) throw new Error("登录后验证仍失败，请检查账号密码");
+  if (isLoginPage(page)) throw new Error("Cookie已失效或未捕获成功，请在Loon开启MITM后重新登录9NB");
   const beforeBalance = extractBalance(page);
   const buttons = checkinButtons(page);
   console.log(`[${account.username}] 签到按钮：${buttons || "今日已签到或页面未提供按钮"}`);
-  const csrf = extractCsrf(page);
-  if (!/今日已签到|今日已经签到|已完成签到/.test(page) && !csrf) throw new Error("签到页未找到动态CSRF");
+  const csrf = extractCsrf(page) || account.csrf || "";
+  const done = /今日已签到|今日已经签到|已完成签到|nb-checkin-entry-done/.test(page);
   let message = "今天已经签到";
   let reward = "无（已签到）";
-  if (!/今日已签到|今日已经签到|已完成签到/.test(page)) {
-    console.log(`[${account.username}] 执行试试手气签到 mode=random`);
-    const result = await request("POST", BASE + "/nb_checkin", cookie, `_csrf=${encodeURIComponent(csrf)}&mode=random`);
+  if (!done) {
+    if (!csrf) throw new Error("签到页未找到动态CSRF，请确认已登录并可正常访问签到入口");
+    console.log(`[${account.username}] 执行试试手气签到（${CHECKIN_PATH}）`);
+    const result = await request("POST", BASE + CHECKIN_PATH, cookie, `_csrf=${encodeURIComponent(csrf)}&mode=random`);
     const text = stripHtml(result).replace(/\s+/g, " ").trim();
     if (isLoginPage(text)) throw new Error("Cookie已失效");
     if (/错误|失败|异常/.test(text) && !/签到成功/.test(text)) throw new Error(text.slice(0, 120));
     message = "签到成功";
     reward = extractReward(text) || "5积分（直接签到）";
   }
-  const after = await request("GET", BASE + "/nb_checkin", cookie);
+  const after = await request("GET", BASE + CHECKIN_PATH, cookie);
   const balance = extractBalance(after) || beforeBalance || "未知";
   return {username: account.username, message, reward, balance};
 }
@@ -208,26 +223,52 @@ function saveAccount(username, cookie) {
   $persistentStore.write(JSON.stringify(all), STORE_KEY);
 }
 function captureCookie() {
-  const url = String($request.url || "");
-  if (!/9nb\.de\/(?:login|nb_checkin)(?:[/?]|$)/i.test(url)) return;
-  const h = $request.headers || {};
-  const cookie = h.Cookie || h.cookie || "";
-  if (!cookie || !/bbs_auth=/.test(cookie)) return;
+  const req = typeof $request !== "undefined" && $request ? $request : null;
+  const resp = typeof $response !== "undefined" && $response ? $response : null;
+  const url = String((req && req.url) || (resp && resp.url) || "");
+  // 路线A：捕获范围扩大到整个 9nb.de，不再只盯 /login 和 /nb_checkin。
+  if (!/^https?:\/\/(?:[^/]*\.)?9nb\.de(?:\/|$)/i.test(url)) return;
+  const h = (req && req.headers) || {};
+  const reqCookie = h.Cookie || h.cookie || "";
+  const respHeaders = (resp && resp.headers) ? resp.headers : null;
+  const respCookie = respHeaders ? cookieHeaderValues(respHeaders).join("; ") : "";
+  const merged = mergeCookies(respHeaders || {}, reqCookie);
+  const cookie = /bbs_auth=/.test(merged) ? merged : (/bbs_auth=/.test(reqCookie) ? reqCookie : "");
+  if (!cookie || !/bbs_auth=/.test(cookie)) {
+    if (respCookie || reqCookie) {
+      // 有 Cookie 但无 bbs_auth，仅记录一次，避免刷屏。
+      const names = cookieNames(merged || respCookie || reqCookie);
+      if (names && !/bbs_csrf$/.test(names)) console.log(`[捕获] ${url} 未含bbs_auth（${names}），继续监听`);
+    }
+    return;
+  }
   console.log(`[捕获] 检测到登录Cookie：${cookieNames(cookie)}，准备保存`);
   const all = typeof $persistentStore !== "undefined" ? parseJSON($persistentStore.read(STORE_KEY), {}) : {};
   const auth = (cookie.match(/(?:^|;\s*)bbs_auth=([^;]+)/i) || [])[1];
   if (!auth) return;
   const key = "auth_" + auth;
+  // 尽量从响应体识别登录用户名，便于与 Argument 中的账号自动对应。
+  const body = (resp && resp.body) ? String(resp.body) : "";
+  const detected = detectUsername(body);
   if (!all[key]) {
-    all[key] = {username: "账号" + (Object.keys(all).length + 1), cookie, updatedAt: Date.now()};
+    all[key] = {username: detected || ("账号" + (Object.keys(all).length + 1)), cookie, updatedAt: Date.now()};
     if (typeof $persistentStore !== "undefined") $persistentStore.write(JSON.stringify(all), STORE_KEY);
-    console.log(`[捕获] 已保存9NB登录Cookie，当前共${Object.keys(all).length}个账号`);
+    console.log(`[捕获] 已保存9NB登录Cookie（${all[key].username}），当前共${Object.keys(all).length}个账号`);
   } else {
     all[key].cookie = cookie;
+    if (detected) all[key].username = detected;
     all[key].updatedAt = Date.now();
     if (typeof $persistentStore !== "undefined") $persistentStore.write(JSON.stringify(all), STORE_KEY);
-    console.log(`[捕获] 已更新已有账号Cookie，当前共${Object.keys(all).length}个账号`);
+    console.log(`[捕获] 已更新9NB登录Cookie（${all[key].username}），当前共${Object.keys(all).length}个账号`);
   }
+}
+// 从登录后页面里识别当前用户名（9NB 顶栏/侧栏会渲染用户名与 /user/N 链接）。
+function detectUsername(html) {
+  if (!html) return "";
+  const text = stripHtml(html).replace(/\s+/g, " ");
+  const m = text.match(/(?:我的主页|个人资料|退出登录|个人中心)[^A-Za-z0-9\u4e00-\u9fa5]{0,20}([A-Za-z0-9_\u4e00-\u9fa5]{2,20})/);
+  if (m) return m[1].trim();
+  return "";
 }
 function extractCsrf(html) {
   const m = String(html).match(/name=["']_csrf["'][^>]*value=["']([^"']+)/i) || String(html).match(/value=["']([^"']+)["'][^>]*name=["']_csrf/i);
