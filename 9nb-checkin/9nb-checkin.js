@@ -1,11 +1,11 @@
 /*
  * 9NB.DE 多账号自动登录签到
- * 版本: 2026-09-15.r2.32.0
+ * 版本: 2026-09-15.r2.33.0
  * 默认每天 08:00 执行；账号去重；账号间随机等待 0-5 分钟。
  * 账号密码仅用于 Loon 本地登录，不会上传或输出密码。
  */
 
-const SCRIPT_VERSION = "2026-09-15.r2.32.0";
+const SCRIPT_VERSION = "2026-09-15.r2.33.0";
 const NAME = "9NB签到";
 const BASE = "https://9nb.de";
 const STORE_KEY = "9nb_checkin_browser_cookies";
@@ -230,12 +230,8 @@ function captureCookie() {
   const url = String((req && req.url) || (resp && resp.url) || "");
   // 只监听 9nb.de
   if (!/^https?:\/\/(?:[^/]*\.)?9nb\.de(?:\/|$)/i.test(url)) return;
-  // 关键防护：静态资源与非 HTML 响应一律立即放行，不读取、不修改，避免破坏响应体。
+  // 静态资源立即放行（规则已收窄到 /login，这里是二重保险）。
   if (STATIC_EXT.test(url)) return;
-  if (resp) {
-    const ct = String(headerValue(resp.headers, "content-type") || "").toLowerCase();
-    if (ct && !/text\/html|application\/xhtml/.test(ct)) return;
-  }
   const h = (req && req.headers) || {};
   const reqCookie = h.Cookie || h.cookie || "";
   const respHeaders = (resp && resp.headers) ? resp.headers : null;
@@ -244,9 +240,11 @@ function captureCookie() {
   const cookie = /bbs_auth=/.test(merged) ? merged : (/bbs_auth=/.test(reqCookie) ? reqCookie : "");
   if (!cookie || !/bbs_auth=/.test(cookie)) {
     if (respCookie || reqCookie) {
-      // 有 Cookie 但无 bbs_auth，仅记录一次，避免刷屏。
       const names = cookieNames(merged || respCookie || reqCookie);
-      if (names && !/bbs_csrf$/.test(names)) console.log(`[捕获] ${url} 未含bbs_auth（${names}），继续监听`);
+      if (names) console.log(`[捕获] ${url} 未含bbs_auth（${names}），继续监听`);
+    } else {
+      const st = resp ? (resp.status || resp.statusCode || "?") : "?";
+      console.log(`[捕获] ${url} HTTP=${st} 无Cookie，继续监听`);
     }
     return;
   }

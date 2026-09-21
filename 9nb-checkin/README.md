@@ -1,6 +1,6 @@
 # 9NB 签到
 
-当前版本：r2.32.0。
+当前版本：r2.33.0。
 
 > ⚠️ **结论：Loon 无法用于 9NB 签到。**
 > 9nb.de 位于 Cloudflare 之后，Loon 对其 MITM 解密后响应损坏，Safari 会把页面当成文件下载（表现为「下载文件 document」）。

@@ -85,20 +85,35 @@ def raw_request(op, url, method="GET", cookie="", body=None, referer=None):
         return e.code, e.headers, e.read().decode("utf-8", "replace")
 
 
+COOKIE_ATTRS = {"expires", "max-age", "path", "domain", "samesite", "secure", "httponly", "version", "comment"}
+
+
 def collect_cookies(headers, prev=""):
-    """合并 Set-Cookie 与已有 Cookie。"""
+    """合并 Set-Cookie 与已有 Cookie。
+
+    注意：Set-Cookie 之间用逗号分隔，而 expires 的值里本身含逗号
+    （Mon, 21 Sep 2026 ...），因此不能按逗号拆分，必须逐个头解析。
+    """
     jar = {}
     for item in re.split(r";\s*", prev or ""):
         if "=" in item:
             k, v = item.split("=", 1)
-            jar[k.strip()] = v.strip()
+            k = k.strip()
+            if k and k.lower() not in COOKIE_ATTRS:
+                jar[k] = v.strip()
     for raw in (headers.get_all("Set-Cookie") or []):
-        for item in re.split(r";\s*", raw):
-            if "=" in item:
-                k, v = item.split("=", 1)
-                k, v = k.strip(), v.strip()
-                if v and v.lower() != "deleted":
-                    jar[k] = v
+        # 有些服务端会把多条 Set-Cookie 合并为一个头，用 ", xxx=" 形式连接。
+        parts = re.split(r",\s*(?=[A-Za-z0-9_\-.#]+\s*=)", raw)
+        for part in parts:
+            first = part.split(";", 1)[0]  # 只取 name=value，忽略属性段
+            if "=" not in first:
+                continue
+            k, v = first.split("=", 1)
+            k, v = k.strip(), v.strip()
+            if not k or k.lower() in COOKIE_ATTRS:
+                continue
+            if v and v.lower() != "deleted":
+                jar[k] = v
     return "; ".join(f"{k}={v}" for k, v in jar.items())
 
 
@@ -394,8 +409,10 @@ def main():
         if args.dry_run:
             status, headers, html = raw_request(op, BASE + "/", cookie=cookie)
             who = extract_username(html)
+            ok = not is_login_page(html)
             print(f"[{username}] dry-run：HTTP={status}，识别用户={who or '未识别'}，"
-                  f"{'登录态有效 ✅' if not is_login_page(html) else 'Cookie 无效 ❌'}")
+                  f"{'登录态有效 ✅' if ok else 'Cookie 无效 ❌'}")
+            results.append(f"{username}：登录正常（{who or '用户未识别'}）" if ok else f"{username}：Cookie 无效")
             continue
 
         res, err = checkin(op, username, cookie)
