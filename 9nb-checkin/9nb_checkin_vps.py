@@ -320,30 +320,48 @@ def send_bark(title, content):
         "icon": "https://9nb.de/favicon.ico",
         "level": "active",
     }
-    # 优先 POST JSON（无长度限制），失败再退回 URL 路径式。
-    for attempt in ("post", "get"):
-        try:
-            if attempt == "post":
-                req = urllib.request.Request(
-                    f"{base}",
-                    data=json.dumps(payload).encode("utf-8"),
-                    headers={"Content-Type": "application/json; charset=utf-8"},
-                    method="POST",
-                )
-            else:
-                url = f"{base}/{urllib.parse.quote(title)}/{urllib.parse.quote(content[:400])}"
-                req = urllib.request.Request(url)
-            with urllib.request.urlopen(req, timeout=15) as r:
-                body = r.read().decode("utf-8", "replace")
-            try:
-                if json.loads(body).get("code") == 200:
-                    return True
-            except Exception:
-                return True
-        except Exception:
-            continue
-    print("⚠️ Bark 推送失败（请检查 BARK_URL）")
+    # 部分 Bark 服务端/CDN 会拦截 Python-urllib 的默认 UA，必须伪装。
+    hdr = {"User-Agent": UA, "Accept": "application/json, text/plain, */*"}
+    errors = []
+    # 1) GET /{title}/{body}（兼容性最好）
+    try:
+        url = f"{base}/{urllib.parse.quote(title)}/{urllib.parse.quote(content[:400])}"
+        req = urllib.request.Request(url, headers=hdr)
+        with urllib.request.urlopen(req, timeout=15) as r:
+            body = r.read().decode("utf-8", "replace")
+        if _bark_ok(body):
+            return True
+        errors.append(f"GET 返回 {body[:120]}")
+    except Exception as e:
+        errors.append(f"GET {e}")
+    # 2) POST /push  JSON（支持长文本）
+    try:
+        req = urllib.request.Request(
+            f"{base}/push",
+            data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+            headers=dict(hdr, **{"Content-Type": "application/json; charset=utf-8"}),
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=15) as r:
+            body = r.read().decode("utf-8", "replace")
+        if _bark_ok(body):
+            return True
+        errors.append(f"POST 返回 {body[:120]}")
+    except Exception as e:
+        errors.append(f"POST {e}")
+    print("⚠️ Bark 推送失败：" + "；".join(errors))
     return False
+
+
+def _bark_ok(body):
+    """Bark 成功时返回 {"code":200,...}；部分自建服务返回纯文本 1 或 success。"""
+    text = (body or "").strip()
+    if not text:
+        return False
+    try:
+        return json.loads(text).get("code") == 200
+    except Exception:
+        return text in ("1", "success", "ok") or "success" in text.lower()
 
 
 def send_telegram(title, content):
@@ -357,8 +375,8 @@ def send_telegram(title, content):
     try:
         req = urllib.request.Request(
             url,
-            data=json.dumps(payload).encode("utf-8"),
-            headers={"Content-Type": "application/json; charset=utf-8"},
+            data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+            headers={"Content-Type": "application/json; charset=utf-8", "User-Agent": UA},
             method="POST",
         )
         with urllib.request.urlopen(req, timeout=15) as r:
