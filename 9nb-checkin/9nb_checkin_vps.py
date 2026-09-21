@@ -171,7 +171,20 @@ def login(op, username, password, verbose=True):
 
 
 def is_login_page(text):
-    return bool(text) and ("请登录后发帖" in text or 'name="_csrf"' in text) and "退出登录" not in text
+    """判断是否被踢回登录页。
+
+    注意：签到页本身也含 name="_csrf"（签到表单），因此不能只看 csrf。
+    真正的登录页特征是密码输入框 / 登录标题。
+    """
+    if not text:
+        return False
+    if 'name="password"' in text or "type=\"password\"" in text:
+        return True
+    if "请登录后发帖" in text and "退出登录" not in text:
+        return True
+    if "<title>登录" in text or "<title> 登录" in text:
+        return True
+    return False
 
 
 def extract_username(text):
@@ -217,11 +230,15 @@ def checkin(op, username, cookie, verbose=True):
     """访问签到入口并提交。返回结果文案。"""
     status, headers, html = raw_request(op, BASE + CHECKIN_PATH, cookie=cookie)
     location = headers.get("Location", "") or ""
+    if verbose:
+        print(f"[{username}] 访问 {CHECKIN_PATH}：HTTP={status}，"
+              f"Location={location or '无'}，长度={len(html)}，"
+              f"Cookie={get_cookie_names(cookie)}")
     if status in (301, 302, 303):
         # 未登录访问 /nb_checkin 会 302 回 /login
         return None, f"Cookie 已失效（跳转 {location}），需重新登录"
     if is_login_page(html):
-        return None, "Cookie 已失效，需重新登录"
+        return None, f"Cookie 已失效（返回登录页，HTTP={status}，长度={len(html)}），需重新登录"
 
     who = extract_username(html)
     if verbose:
