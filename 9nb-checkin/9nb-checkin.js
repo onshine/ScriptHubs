@@ -1,11 +1,11 @@
 /*
  * 9NB.DE 多账号自动登录签到
- * 版本: 2026-09-15.r2.20.0
+ * 版本: 2026-09-15.r2.21.0
  * 默认每天 08:00 执行；账号去重；账号间随机等待 0-5 分钟。
  * 账号密码仅用于 Loon 本地登录，不会上传或输出密码。
  */
 
-const SCRIPT_VERSION = "2026-09-15.r2.20.0";
+const SCRIPT_VERSION = "2026-09-15.r2.21.0";
 const NAME = "9NB签到";
 const BASE = "https://9nb.de";
 const STORE_KEY = "9nb_checkin_browser_cookies";
@@ -164,14 +164,16 @@ async function login(username, password) {
   const initialCookie = mergeCookies(first.headers, "");
   console.log(`[${username}] 4/6 准备POST /login，初始Cookie=${cookieNames(initialCookie) || "无"}`);
   const body = `_csrf=${encodeURIComponent(csrf)}&username=${encodeURIComponent(username)}&password=${encodeURIComponent(password)}`;
-  const response = await requestResponse("POST", BASE + "/login", initialCookie, body, false);
+  const response = await requestResponse("POST", BASE + "/login", initialCookie, body);
   console.log(`[${username}] 5/6 登录POST HTTP=${response.status || "未知"}，响应Cookie=${cookieHeaderNames(response.headers) || "无"}`);
   const cookie = mergeCookies(response.headers, initialCookie);
   console.log(`[${username}] 6/6 合并Cookie=${cookieNames(cookie) || "无"}`);
   if (!cookie || !/bbs_auth=/.test(cookie)) {
     const detail = stripHtml(response.body).replace(/\s+/g, " ").trim();
-    if (/form_error|用户名|密码|错误|失败/.test(detail)) throw new Error(`登录被站点拒绝${response.status ? "（HTTP " + response.status + "）" : ""}`);
-    throw new Error(`登录响应未返回Cookie${response.status ? "（HTTP " + response.status + "）" : ""}`);
+    const raw = String(response.body || "").replace(/\s+/g, " ").slice(0, 500);
+    console.log(`[${username}] 登录未成功，响应片段=${raw || "空"}`);
+    if (/form_error|用户名|密码|错误|失败/.test(detail)) throw new Error(`登录被站点拒绝${response.status ? "（HTTP " + response.status + "）" : ""}：${detail.slice(0, 160)}`);
+    throw new Error(`登录响应未返回Cookie${response.status ? "（HTTP " + response.status + "）" : ""}：${detail.slice(0, 160)}`);
   }
   const verify = await request("GET", BASE + "/nb_checkin", cookie);
   if (isLoginPage(verify)) throw new Error("账号密码不正确或登录被拒绝");
@@ -220,10 +222,26 @@ function isLoginPage(text) { return /登录|用户名|密码/.test(stripHtml(tex
 function mergeCookies(headers, old) {
   const out = {};
   String(old || "").split(";").forEach(x => { const p = x.trim().split("="); if (p.length > 1) out[p[0]] = p.slice(1).join("="); });
-  let values = headers && (headers["set-cookie"] || headers["Set-Cookie"] || headers["SET-COOKIE"] || []);
-  if (!Array.isArray(values)) values = [values];
-  values.forEach(v => String(v).split(/,\s*(?=[^;,=]+=[^;,]+)/).forEach(x => { const m = x.match(/^\s*([^=;]+)=([^;]*)/); if (m && !/^(Path|Expires|Max-Age|Domain|SameSite|Secure|HttpOnly)$/i.test(m[1])) out[m[1]] = m[2]; }));
+  const values = cookieHeaderValues(headers);
+  values.forEach(raw => {
+    // HTTP/2 下 set-cookie 可能是单个字符串、数组或被逗号拼接；逐个 bbs_* 提取，不依赖逗号切分。
+    const str = String(raw);
+    const re = /(?:^|[;,\s])(bbs_csrf|bbs_auth|bbs_session|bbs_session_id|session|PHPSESSID)\s*=\s*([^;,\s]+)/gi;
+    let m;
+    while ((m = re.exec(str)) !== null) {
+      const name = m[1];
+      const value = m[2];
+      if (value && value.toLowerCase() !== "deleted") out[name] = value;
+    }
+  });
   return Object.keys(out).map(k => `${k}=${out[k]}`).join("; ");
+}
+function cookieHeaderValues(headers) {
+  if (!headers) return [];
+  const keys = Object.keys(headers).filter(k => k.toLowerCase() === "set-cookie");
+  if (!keys.length) return [];
+  const raw = keys.map(k => headers[k]).reduce((acc, v) => acc.concat(Array.isArray(v) ? v : [v]), []);
+  return raw.map(x => String(x)).filter(Boolean);
 }
 function checkinButtons(html) {
   const s = String(html);
@@ -233,8 +251,7 @@ function checkinButtons(html) {
 }
 function cookieNames(cookie) { return String(cookie || "").split(";").map(x => x.trim().split("=")[0]).filter(Boolean).join(","); }
 function cookieHeaderNames(headers) {
-  const v = headers && (headers["set-cookie"] || headers["Set-Cookie"] || headers["SET-COOKIE"] || "");
-  return (Array.isArray(v) ? v : [v]).map(x => String(x).match(/^\s*([^=;]+)/)).filter(Boolean).map(x => x[1]).join(",");
+  return cookieHeaderValues(headers).map(x => String(x).match(/^\s*([^=;]+)/)).filter(Boolean).map(x => x[1]).join(",");
 }
 function stripHtml(s) { return String(s).replace(/<script[\s\S]*?<\/script>/gi, "").replace(/<style[\s\S]*?<\/style>/gi, "").replace(/<[^>]+>/g, " ").replace(/&nbsp;/g, " "); }
 function parseJSON(s, fallback) { try { return s ? JSON.parse(s) : fallback; } catch (_) { return fallback; } }
