@@ -1,16 +1,20 @@
 /*
  * 9NB.DE 多账号自动登录签到
- * 版本: 2026-09-15.r2.33.0
+ * 版本: 2026-09-15.r2.34.0
  * 默认每天 08:00 执行；账号去重；账号间随机等待 0-5 分钟。
  * 账号密码仅用于 Loon 本地登录，不会上传或输出密码。
  */
 
-const SCRIPT_VERSION = "2026-09-15.r2.33.0";
+const SCRIPT_VERSION = "2026-09-15.r2.34.0";
 const NAME = "9NB签到";
 const BASE = "https://9nb.de";
 const STORE_KEY = "9nb_checkin_browser_cookies";
 // 签到入口：9NB 的签到组件挂在首页/顶栏，独立 /nb_checkin 路径实测 404。
 const CHECKIN_PATH = "/";
+// 脚本自身请求是否强制直连（绕开 MITM）。
+// 默认 false：走 MITM，使 http-response 规则能拦截脚本发起的 302 并读到 bbs_auth。
+// 若总是报 "certificate verify failed"，把它改成 true（此时必须已有捕获的 Cookie）。
+const USE_DIRECT = false;
 const UA = "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 Mobile/15E148 Safari/604.1";
 // 静态资源后缀：捕获脚本必须立即放行，绝不参与处理，否则会破坏响应导致浏览器下载文件。
 const STATIC_EXT = /\.(?:css|js|mjs|json|map|png|jpe?g|gif|webp|avif|svg|ico|bmp|woff2?|ttf|otf|eot|mp3|mp4|webm|ogg|wav|pdf|zip|gz|rar|7z|txt|xml)(?:$|[?#])/i;
@@ -20,7 +24,7 @@ const STATIC_EXT = /\.(?:css|js|mjs|json|map|png|jpe?g|gif|webp|avif|svg|ico|bmp
     // 拦截触发（http-request / http-response）优先于 cron，避免误跑签到流程。
     if (typeof $request !== "undefined" && $request) return captureCookie();
     if (typeof $response !== "undefined" && $response) return captureCookie();
-    console.log(`[9NB签到] 脚本版本 ${SCRIPT_VERSION}（MITM Cookie捕获 + 静态资源自动放行）`);
+    console.log(`[9NB签到] 脚本版本 ${SCRIPT_VERSION}（MITM捕获+DIRECT回退）`);
     const input = readArgument();
     const accounts = loadAccounts(input);
     console.log(`[参数] 读取到${accounts.length}个账号配置`);
@@ -131,10 +135,28 @@ async function runAccount(account) {
     console.log(`[${account.username}] 未找到已捕获Cookie，尝试模拟登录（Loon可能丢失302 Set-Cookie）`);
     try {
       cookie = await login(account.username, account.password);
-      saveAccount(account.username, cookie);
-      console.log(`[${account.username}] 模拟登录成功，Cookie已保存`);
+      // login 返回的 Cookie 可能因 Loon 跟随重定向而缺失 bbs_auth。
+      // 此时 http-response 规则已把 302 的 Set-Cookie 存进 store，等它落盘后再读。
+      if (!/bbs_auth=/.test(cookie)) {
+        const captured = await waitCapturedCookie(account.username, 3000);
+        if (captured) {
+          console.log(`[${account.username}] 从捕获规则取得完整Cookie：${cookieNames(captured)}`);
+          cookie = captured;
+        }
+      }
+      if (/bbs_auth=/.test(cookie)) {
+        saveAccount(account.username, cookie);
+        console.log(`[${account.username}] 模拟登录成功，Cookie已保存`);
+      }
     } catch (e) {
-      throw new Error(`无可用Cookie，且模拟登录失败：${e && e.message ? e.message : e}\n请在Loon开启MITM(9nb.de)后，手动登录一次9NB以捕获Cookie`);
+      const captured = await waitCapturedCookie(account.username, 3000);
+      if (captured) {
+        console.log(`[${account.username}] 登录请求报错，但已从捕获规则取得Cookie：${cookieNames(captured)}`);
+        cookie = captured;
+        saveAccount(account.username, cookie);
+      } else {
+        throw new Error(`无可用Cookie，且模拟登录失败：${e && e.message ? e.message : e}`);
+      }
     }
   }
   if (!cookie) throw new Error("没有Cookie且未提供密码");
@@ -364,13 +386,51 @@ function request(method, url, cookie, body) { return requestResponse(method, url
 function requestResponse(method, url, cookie, body, followRedirect = true) {
   return new Promise((resolve, reject) => {
     const headers = {"User-Agent": UA, "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8", "Referer": method === "POST" && /\/login$/.test(url) ? BASE + "/login" : BASE + "/nb_checkin", "Origin": BASE, "Cookie": cookie || "", "Content-Type": "application/x-www-form-urlencoded"};
+    // 脚本请求默认走 MITM 出口：这样 http-response 能拦截到自己发起的 302 并读到 Set-Cookie。
+    // 若 MITM 导致 TLS 校验失败，可把 USE_DIRECT 改为 true 改为直连（此时需用已捕获的 Cookie）。
     const opts = {url, headers, body};
+    if (USE_DIRECT) opts.node = "DIRECT";
     if (followRedirect === false) opts.followRedirect = false;
-    const cb = (err, resp, data) => err ? reject(err) : resolve({body: data || "", headers: resp && resp.headers ? resp.headers : {}, status: resp && (resp.status || resp.statusCode) ? (resp.status || resp.statusCode) : 0});
+    const cb = (err, resp, data) => err ? reject(normalizeError(err)) : resolve({body: data || "", headers: resp && resp.headers ? resp.headers : {}, status: resp && (resp.status || resp.statusCode) ? (resp.status || resp.statusCode) : 0});
     if (typeof $httpClient !== "undefined") return method === "GET" ? $httpClient.get(opts, cb) : $httpClient.post(opts, cb);
-    if (typeof $task !== "undefined") return $task.fetch({url, method, headers, body}).then(r => resolve({body: r.body || "", headers: r.headers || {}, status: r.statusCode || 0})).catch(reject);
+    if (typeof $task !== "undefined") return $task.fetch({url, method, headers, body}).then(r => resolve({body: r.body || "", headers: r.headers || {}, status: r.statusCode || 0})).catch(e => reject(normalizeError(e)));
     reject(new Error("不支持的脚本环境"));
   });
+}
+// 把 Loon 冗长的 SSL 报错翻译成可操作的提示。
+// 登录后（或登录报错后）轮询 store，等待 http-response 规则把 bbs_auth 写入。
+function waitCapturedCookie(username, timeoutMs) {
+  return new Promise(resolve => {
+    const deadline = Date.now() + timeoutMs;
+    const tick = () => {
+      const found = findCapturedCookie(username);
+      if (found) return resolve(found);
+      if (Date.now() >= deadline) return resolve("");
+      setTimeout(tick, 300);
+    };
+    tick();
+  });
+}
+function loadStore() {
+  if (typeof $persistentStore === "undefined") return {};
+  try {
+    return JSON.parse($persistentStore.read(STORE_KEY) || "{}") || {};
+  } catch (_) {
+    return {};
+  }
+}
+function findCapturedCookie(username) {
+  const all = loadStore();
+  const vals = Object.keys(all).map(k => all[k]).filter(x => x && x.cookie && /bbs_auth=/.test(x.cookie));
+  const byName = vals.find(x => x.username === username);
+  return (byName || vals[0] || {}).cookie || "";
+}
+function normalizeError(err) {
+  const msg = String(err && err.message ? err.message : err);
+  if (/certificate verify failed|SSL handshake|TLSError/i.test(msg)) {
+    return new Error("TLS握手失败：脚本请求被自己的MITM拦截（Loon不支持脚本请求本机MITM的域名）。请关闭9nb.de的MITM后重试，或改用VPS方案。");
+  }
+  return err instanceof Error ? err : new Error(msg);
 }
 // Loon 的 $httpClient 可能忽略 followRedirect:false，此时 302 被跟随、Set-Cookie 丢失。
 // 用 curl 风格的探测：先原样发一次，若状态变成 200 且响应像首页，则说明重定向被跟随。
