@@ -6,6 +6,7 @@
 - `workbuddy2api.sh` — 部署 / 更新 / 停止 / 重启 / 状态自检 / 重置面板密码
 - `deploy.sh` — ⚠️ **已更名**为 `workbuddy2api.sh`；此文件保留为兼容外壳，旧命令 `./deploy.sh xxx` 仍可用
 - `net-check.sh` — 容器网络与出网排查
+- `open-docker-ctl.sh` — 面板「一键更新」能力开关（诊断 / 开启 / 关闭），处理「套接字已挂载但容器无权限」这一中间态
 - `caddy.example.conf` — 反向代理最小示例（仅反代，不含任何个人配置）
 
 > ⚠️ **合规提醒**：workbuddy2api 是第三方账号的非官方 OpenAI 兼容网关，
@@ -245,51 +246,104 @@ cd /opt/workbuddy/workbuddy2api && docker compose up -d --force-recreate && slee
 
 > 当前环境无法操作 docker（宿主未安装 docker，或容器未挂载 /var/run/docker.sock）…
 
-**先别急着改 compose** —— 宿主有 docker（1Panel 必然有）时，
-真正的原因通常是**权限**，不是挂载。
+**这句话有误导性 —— 它把三类完全不同的情况混成一句提示。** 宿主有 docker
+（1Panel 必然有）时，**最常见的原因其实是权限，不是挂载**：套接字确实挂进去了，
+但容器进程读不到，`permission denied` 被面板笼统显示成了"未挂载"。
 
-按顺序确认：
+#### 先搞清楚官方是怎么设计的
+
+上游仓库 `docker-compose.yml` 里两处注释直接说明了设计意图：
+
+- 文件头：「容器版**能**在界面上更新上游 —— 镜像内置了 docker CLI 与 compose 插件，
+  **挂上 docker.sock 后即可在容器内重建上游容器**。不挂时降级为「请到宿主机操作」」
+- volumes：「**安全性说明（值得读）**：挂 docker.sock 等于把宿主 root 权限交给本容器。
+  但这**不是新增的风险等级** —— 宿主部署时本服务本来就是 root 运行
+  （systemd 单元无 `User=`、安装脚本要求 root），而 root 进程本来就能
+  `docker run -v /:/host`。**两者权限等价。**」
+
+**两个关键结论：**
+
+1. **官方 compose 里 socket 那行默认就是启用的**，不是选装项。所以"要不要挂"
+   在多数部署里已经既成事实 —— 加 `group_add` 只是让**已经挂着的**套接字真正生效。
+2. **"挂了 socket = 新增风险"是个误解。** 官方部署路径本来就以 root 运行，
+   权限本来就等价。真正的风险点在于**面板本身是否暴露公网**，而不是这一行配置。
+
+> ⚠️ 但"权限等价"不等于"没风险"——它意味着**风险一直存在，且由部署方式决定**。
+> 如果这台机器上面板曾暴露公网、或多人共用，那风险是真实且高的（见第六节）。
+
+#### 诊断：三步定位，别猜
 
 ```bash
 # ① 套接字有没有挂进面板容器
 docker inspect workbuddy-manager --format '{{range .Mounts}}{{.Source}} -> {{.Destination}}{{"\n"}}{{end}}' | grep docker.sock
 
-# ② 面板容器里跑的是哪个用户
-docker exec workbuddy-manager id
+# ② 面板容器里的用户身份
+docker exec workbuddy-manager id        # 期望看到 groups=10001(app),995(docker)
 
-# ③ 套接字的属主/属组
-stat -c "%U:%G %a" /var/run/docker.sock
-getent group docker
+# ③ 宿主 docker 组 GID
+getent group docker                     # 例如 docker:x:995:
 
-# ④ 决定性证据：容器里能不能真的调通 docker
+# ④ ★ 决定性证据：容器里能不能真的调通 docker
 docker exec workbuddy-manager docker ps
 ```
 
-若 ④ 报 `permission denied while trying to connect to the Docker daemon socket`
-→ 就是**权限问题**：面板以非 root 用户（`uid=10001`）运行，
-而套接字是 `srw-rw---- root:docker(995)`，它既不是 root 也不在 `docker` 组。
+**④ 的报错文案决定修法，这两种完全不同：**
 
-**修法**：给面板容器补上 `docker` 组（GID 以 `getent group docker` 实际值为准）：
+| ④ 报什么 | 含义 | 修法 |
+|---|---|---|
+| `permission denied while trying to connect to the Docker daemon socket` | **权限问题**：套接字挂上了，但容器非 root 且不在 docker 组 | 补 `group_add`（见下） |
+| `command not found` / `not found` | **镜像问题**：容器里压根没有 docker CLI | 补 `group_add` **无效**！需换回官方镜像 |
+| 正常列出容器 | 已经能用 | 无需操作 |
+
+「挂了但没权限」这个中间态官方没覆盖 —— 他的 compose 假设"挂上就能用"，
+但没考虑容器以非 root 且不在 docker 组运行的情况（1Panel 环境常见）。
+
+#### 修法：补一行 group_add
 
 ```yaml
-# workbuddy-manager 服务里加
+# workbuddy-manager 服务的 volumes 之后加
     group_add:
-      - "995"
+      - "995"      # GID 以 getent group docker 的实际输出为准，不要照抄 995
 ```
 
 ```bash
-cd /opt/workbuddy/workbuddy-manager && docker compose up -d --force-recreate
+cd /opt/workbuddy/workbuddy-manager
+docker compose up -d --force-recreate workbuddy-manager
+
+# 验证两条都要过
+docker exec workbuddy-manager id          # 应出现 ,995(docker)
 docker exec workbuddy-manager docker ps   # 应正常列出容器
 ```
 
-> **🔒 但请先读第六节。**
-> 挂 `docker.sock` 等于把**宿主 root 权限**交给面板容器 —— 它能起特权容器、
-> 挂载宿主根目录。面板里存着所有账号凭据，一旦该容器被攻破，
-> 攻击者拿到的是**整台服务器**而不是几个账号。
->
-> 「一键更新」只为省下面 5.9 那三行命令。**官方镜像作者自己的建议也是
-> 不挂**，本套件默认不生成 `group_add`，相关功能自动降级为界面提示。
-> 除非这台机器只是自用测试机，否则**建议保持现状**。
+> 💡 本目录新增 **`open-docker-ctl.sh`** 把上面这套流程封装了，含诊断 + 幂等开/关：
+> ```bash
+> ./open-docker-ctl.sh status   # 诊断（只读，告诉你到底卡在哪一类）
+> ./open-docker-ctl.sh on       # 开启（自动取宿主 GID、备份 compose、校验 YAML、重建）
+> ./open-docker-ctl.sh off      # 关闭（精确移除，逐字节还原 compose）
+> ```
+> 它**不替你判断该不该开**，只负责正确地开/关/诊断。
+
+#### 关闭（回到"界面提示"模式）
+
+```bash
+./open-docker-ctl.sh off
+# 或手工：删掉 group_add 那两行，然后
+cd /opt/workbuddy/workbuddy-manager && docker compose up -d --force-recreate workbuddy-manager
+```
+
+关闭后「一键更新」按钮降级为界面提示「请到宿主机操作」，**不会静默失败** ——
+这也是官方设计的降级路径。之后用 5.9 的命令行方式更新。
+
+#### 开了还是不开？
+
+| 场景 | 建议 |
+|---|---|
+| 自用测试机 / 面板不对外 | 开，省事。面板更新上游时还会**自动重新施加端口收敛**（守住 `WB2A_LISTEN` 绑回环，比手工脚本只检测不动手强） |
+| 面板曾暴露公网 / 多人共用 | 别开，用 5.9 命令行更新 |
+| 只是不想每次敲命令 | 用 5.9，三行命令，效果完全一样 |
+
+**唯一的分界线是「面板有没有被外人碰到」。** 挂 socket 不会凭空创造风险，
+但会让**已存在的暴露**变成整机沦陷。
 
 ### 5.9 更新上游 / 面板（不依赖面板按钮）
 
@@ -346,7 +400,11 @@ ss -lntp | grep 17863     # 必须是 127.0.0.1:17863，若是 0.0.0.0 则已暴
 - [ ] `WB_TRUSTED_PROXY_CIDRS` 覆盖反代实际来源网段
 - [ ] 面板密码为强随机值（它是唯一那道门时尤其重要）
 - [ ] `auths/` 权限 `700`、属主 10001；备份文件 `600`
-- [ ] 评估是否真的需要挂载 `/var/run/docker.sock`（等价宿主 root）
+- [ ] 评估面板是否需要 docker 控制能力（`open-docker-ctl.sh status` 可诊断）。
+      **注意**：官方 compose 默认就挂 `/var/run/docker.sock`，且原生部署本来也是 root 运行——
+      挂载**不新增**风险等级；真正的分界线是**面板有没有可能被外人访问**。
+      面板曾暴露公网 / 多人共用 → 用 `off` 关闭，走命令行更新（5.9）
+      自用测试机 / 面板不对外 → 可开，省事且能自动重施端口收敛
 - [ ] 明确这是非官方网关，仅用于本人授权账号 + 私有测试
 
 > 面板安全机制（来自其源码）：PBKDF2-SHA256 26 万次迭代存储密码、
@@ -389,6 +447,7 @@ workbuddy2api-manager/
 
 | 版本 | 说明 |
 |---|---|
+| R1.0.3 | **修正 5.8 的认知错误**：原文称「官方作者建议不挂 docker.sock」，实际读上游仓库后确认**反了** —— 官方 compose 里该行默认启用，且注释明确论证「挂 socket 与原生 root 部署权限等价，不是新增风险」。新增 `open-docker-ctl.sh`（诊断 / 开启 / 关闭面板 docker 控制能力，幂等、带 compose 备份与 YAML 校验）。重写 5.8：明确区分 `permission denied`（权限，补 group_add）与 `command not found`（缺镜像 CLI，补组无效），补齐开启/关闭完整流程与决策依据。第六节清单同步修正。 |
 | R1.0.2 | **修正网关容器永远 `unhealthy`**：官方镜像 healthcheck 写死探测 `127.0.0.1:7863/healthz`，而本脚本让网关监听 `GW_PORT`（默认 17863），两者不一致导致连续失败（服务实际正常）。生成 compose 时覆盖为实际端口（host/bridge 两个分支都已处理）。此问题会让**告警彻底失效**（永远红 → 真挂了也看不出）。新增 README 5.7/5.8/5.9：unhealthy 修复、面板「无法操作 docker」的权限诊断（`group_add` 与风险）、不依赖面板按钮的上游/面板更新命令与三个坑。 |
 | R1.0.1 | 主脚本 `deploy.sh` 更名为 `workbuddy2api.sh`（脚本内容与 R1.0.0 完全一致，仅自身引用文案随之更新）。原 `deploy.sh` 保留为**兼容外壳**，透传参数到新脚本，旧命令继续可用 —— 已部署的服务器无需任何操作。README 命令示例统一改为新名。 |
 | R1.0.0 | 首个版本。`deploy.sh` 支持部署/更新/停止/重启/状态/日志/重置密码；`NET_MODE=host` 应对 LXC 里 Docker bridge 出网不通；三重自检（端口链 / 登录接口 / 容器出网）；修正面板容器内固定 7864 但映射写成同号导致的 502；修正「每次重跑都打印一个无效的面板密码」；`reset-password` 用与面板一致的 PBKDF2-SHA256 重写哈希并递增会话版本。附 `net-check.sh` 与 `caddy.example.conf`。 |
