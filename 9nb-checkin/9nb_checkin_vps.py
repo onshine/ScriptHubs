@@ -302,12 +302,20 @@ def save_cookies(data):
 def notify(title, content):
     """发送通知到 Bark 与 Telegram（配了哪个发哪个）。"""
     sent = []
+    if not BARK_URL and not (TG_BOT_TOKEN and TG_CHAT_ID):
+        print("[推送] 未配置任何通知渠道，跳过（只打印结果）")
+        return sent
     if BARK_URL:
         if send_bark(title, content):
             sent.append("Bark")
     if TG_BOT_TOKEN and TG_CHAT_ID:
         if send_telegram(title, content):
             sent.append("Telegram")
+    # 成功也要留痕，否则日志里分不清「推送成功」和「根本没推」
+    if sent:
+        print(f"[推送] {', '.join(sent)} ✅")
+    else:
+        print("[推送] ❌ 所有渠道均失败（详见上方告警）")
     return sent
 
 
@@ -474,6 +482,11 @@ def main():
     ap.add_argument("--from-env", action="store_true", help="从环境变量 NINE_NB_ACCOUNTS 读取账号")
     ap.add_argument("--test-notify", action="store_true", help="只测试通知推送是否配置正确")
     args = ap.parse_args()
+
+    # 首次执行时打印带本地时间戳的分隔头。
+    # cron 的日志是追加的，没有时间戳就无法区分每次执行（排查时尤其难受）。
+    if not args.add and not args.list and not args.del_account:
+        print(f"\n===== {time.strftime('%Y-%m-%d %H:%M:%S %Z')} =====", flush=True)
 
     # 管理账号，不必编辑脚本
     if args.add:
