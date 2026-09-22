@@ -18,15 +18,7 @@ Linux 虚拟机和大部分 ARM VPS）可以直接跑。
 
 ```sh
 mkdir -p /opt/9router && cd /opt/9router
-curl -fsSLO https://raw.githubusercontent.com/ScriptHubs/main/9router/9router.sh
-```
-
-> 上面这条 URL 请换成你的仓库实际路径，例如：
-> `https://raw.githubusercontent.com/<你的用户名>/ScriptHubs/main/9router/9router.sh`
-
-然后：
-
-```sh
+curl -fsSLO https://raw.githubusercontent.com/onshine/ScriptHubs/main/9router/9router.sh
 chmod +x 9router.sh
 DOMAIN=9router.你的域名.com ./9router.sh
 ```
