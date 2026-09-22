@@ -53,6 +53,60 @@ systemctl reload caddy
 
 ---
 
+## LXC 里 bridge 出网不通？用 `NET_MODE=host`
+
+在 LXC/PVE 容器里跑 Docker 时，bridge 网络的 NAT 出网经常是坏的 —— 表现是
+**宿主机能上网，容器里连 github.com 都超时**。9Router 所有请求都要容器发起去连
+上游，出网不通 = 网关完全不可用（仪表板能开，一个模型都调不通）。
+
+自检里的「容器出网」那一项就是专门抓这个的。不通就切 host：
+
+```sh
+NET_MODE=host ./9router.sh
+```
+
+脚本会自动处理模式切换（删旧容器栈 + 清理 Docker 网络 + 标记 `.net_mode`），
+再跑一次不带 `NET_MODE` 就切回 bridge。
+
+### ⚠️ host 模式下的安全要点（和 workbuddy 那套不一样）
+
+workbuddy2api 有 `WB2A_LISTEN` 这种"只改监听地址"的变量，绑回环很简单。
+**9Router 没有这种变量** —— 它只能通过 `PORT` / `HOSTNAME` 两个环境变量控制绑定
+地址，而**官方镜像的 Dockerfile 把 `HOSTNAME=0.0.0.0` 烤死了**：
+
+```dockerfile
+ENV PORT=20128
+ENV HOSTNAME=0.0.0.0        # ← 只写 compose 的 environment 容易漏掉这个
+```
+
+如果 host 模式下没显式覆盖 `HOSTNAME`，9Router 会**直接监听宿主机 `0.0.0.0:15900`**，
+没有 docker-proxy 那一层兜底，等于把持有全部上游 OAuth token 的网关挂上公网。
+
+所以本脚本在 host 模式下做了两件事：
+
+1. **`PORT` 和 `HOSTNAME` 都显式写进 compose**，不依赖镜像默认值
+2. **启动后硬断言实际监听地址**：实测能不能从非回环地址连上，能连上就报警，
+   并给出针对性排查提示（`NET_MODE=host` 时提示查 `HOSTNAME`）
+
+（已核对 Next 16.1.6 的 standalone 模板：`hostname = process.env.HOSTNAME || '0.0.0.0'`，
+确认是环境变量驱动，所以覆盖 `HOSTNAME` 这条路可行。）
+
+### 两个模式的区别
+
+| | bridge（默认） | host |
+|---|---|---|
+| 端口 | `127.0.0.1:15900:20128` | 只有 `15900`，容器宿主共用网络栈 |
+| 容器内端口 | `20128` | `15900`（就是 PORT） |
+| HOSTNAME | `0.0.0.0`（靠端口映射收口） | **必须** `127.0.0.1` |
+| 出网 | 走 Docker bridge NAT（LXC 里常坏） | 直接用宿主网络栈 |
+| healthcheck 探 | `127.0.0.1:20128/api/health` | `127.0.0.1:15900/api/health` |
+
+⚠️ 切模式时脚本会重建整个容器栈，这是必须的：bridge 建的容器带端口映射，
+切成 host 后那些映射会变成"宿主端口自己的监听"（docker-proxy 占着），
+不清理干净会互相打架。
+
+---
+
 ## 自检
 
 ```sh
@@ -64,11 +118,29 @@ systemctl reload caddy
 | 检查项 | 抓的是什么故障 |
 |---|---|
 | 容器状态 | 起没起来 |
-| 端口映射 | 宿主端口 → 容器端口写错（`PANEL_PORT:PANEL_PORT` 那类静默 502） |
+| 端口映射 | 宿主端口 → 容器端口写错（bridge 模式下漏 `127.0.0.1:` 前缀那类静默 502） |
 | 端口链（容器内 → 宿主 → HTTP 200） | 三段分开验，坏在哪一段一目了然 |
 | 登录链路 | 拿密码真的 POST 一次 `/api/auth/login` |
-| 容器出网 | 连不上上游 = 网关转发全挂，LXC 里很常见 |
-| 暴露面 | 15900 是不是只绑在 127.0.0.1 上 |
+| 容器出网 | 连不上上游 = 网关转发全挂，LXC 里很常见 → 该上 `NET_MODE=host` 了 |
+| **监听地址** | **host 模式下最关键的一项**：实测有没有暴露到非回环地址 |
+| 网络模式 | 当前记录的是 bridge 还是 host |
+
+### 关于「监听地址」这项的判定方式
+
+最早我用 `ss -lntp | grep 0.0.0.0` 做判定，**是个误报源**：bridge 模式下端口映射
+写成 `127.0.0.1:15900:20128` 时，`ss` 会列出两条记录 ——
+
+```
+127.0.0.1:15900      ← docker-proxy 真正 accept 的连接
+[::1]:15900          ← 端口映射规则，只接受 IPv6 回环，不 accept
+```
+
+只看"输出里有没有 `0.0.0.0`"会对**完全正确**的配置报警，很吓人。
+
+现在改成先解析监听表、只认**会 accept 的通配地址**（`0.0.0.0:PORT` / `*:PORT` /
+`[::]:PORT`），`[::1]:PORT` 不算；监听表拿不到时才退回 TCP 实测（从非回环地址
+试着连一下）。这套判定逻辑有 10 个用例的单测覆盖（含 `[::1]` 误报、端口号前缀
+`1590` vs `15900` 的边界）。
 
 ---
 
@@ -163,14 +235,20 @@ Docker 的环境变量是**创建容器时**注入的，`restart` 读的是旧�
 ./9router.sh reset-password       # 重置登录密码（自动备份数据目录）
 ```
 
-可用环境变量覆盖：`DOMAIN` `BASE_DIR` `PORT` `CONTAINER_NAME` `IMAGE`
-`PANEL_PASSWORD` `REQUIRE_API_KEY` `SECURE_COOKIE` `OUTBOUND_PROXY`
+可用环境变量覆盖：`DOMAIN` `BASE_DIR` `PORT` `CTR_PORT` `CONTAINER_NAME` `IMAGE`
+`NET_MODE` `PANEL_PASSWORD` `REQUIRE_API_KEY` `SECURE_COOKIE` `OUTBOUND_PROXY`
 `TZ_NAME` `PULL_IMAGE` `UPDATE_COMPOSE`。
 
 例：换个端口、顺手给出站挂代理
 
 ```sh
 DOMAIN=9r.example.com PORT=25900 OUTBOUND_PROXY=http://127.0.0.1:7890 ./9router.sh
+```
+
+例：LXC 里 bridge 出网不通（最常见的情况）
+
+```sh
+NET_MODE=host ./9router.sh
 ```
 
 ---
@@ -224,9 +302,24 @@ Model    : if/kimi-k2-thinking  或其他前缀模型
 先等 30 秒。Next.js 冷启动要 10~30 秒，刚 `up -d` 完就探多半是假的。
 还不行就 `docker logs --tail 50 9router`。
 
+**Q：容器出网不通怎么办？**
+这就是 `NET_MODE=host` 的用途，见上文专节。LXC 里 bridge NAT 出网坏掉很常见，
+宿主机能上网不代表容器能。
+
+**Q：host 模式下 `status` 报「已暴露公网」？**
+说明 9Router 在监听 `0.0.0.0` 而不是 `127.0.0.1`。检查 compose 里
+`HOSTNAME: "127.0.0.1"` 在不在 —— 官方镜像把 `HOSTNAME=0.0.0.0` 烤死了，
+环境变量只在**创建容器时**注入，改完要 `./9router.sh restart`（内部用
+`--force-recreate`，普通 `restart` 读旧值）。紧急止血：
+
+```sh
+iptables -I INPUT -p tcp --dport 15900 ! -s 127.0.0.1 -j DROP
+```
+
 **Q：更新怎么弄？**
 直接重跑 `./9router.sh`（会拉新镜像、停旧起新，`.env` 和 `data/` 都不动）。
-数据目录不在容器里，更新不会丢配置。
+数据目录不在容器里，更新不会丢配置。如果你在用 host 模式，记得带上
+`NET_MODE=host`，否则会被切回 bridge（脚本会提示模式变更）。
 
 ---
 
@@ -234,6 +327,7 @@ Model    : if/kimi-k2-thinking  或其他前缀模型
 
 | 版本 | 日期 | 说明 |
 |---|---|---|
+| R1.1.0 | 2026-09-22 | 新增 `NET_MODE=host`（LXC 里 bridge 出网不通时用），含模式切换自动清理（删旧容器栈 + 清 Docker 网络 + `.net_mode` 标记）。host 模式下显式覆盖 `PORT`/`HOSTNAME` 两个变量并把监听地址硬断言为回环 —— 官方镜像把 `HOSTNAME=0.0.0.0` 烤死了，漏覆盖就会把网关挂公网。修掉「监听地址自检」的误报：端口映射会让 `ss` 列出不 accept 的 `[::1]:PORT`，旧逻辑只看有没有 `0.0.0.0`，对正确配置也会报警；现改为只认会 accept 的通配地址，10 个用例单测覆盖。 |
 | R1.0.0 | 2026-09-22 | 首版。基于 9Router 0.5.85 源码实测：仅绑回环端口、随机 `INITIAL_PASSWORD`（规避反代下 `isLocalRequest` 恒假导致的登录 403）、`REQUIRE_API_KEY` 默认开启、显式 healthcheck、`reset-password`（备份+重建库）、端口链/登录链路/出网/暴露面四项自检。 |
 
 ---

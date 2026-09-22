@@ -44,20 +44,45 @@
 #   ./9router.sh                      # 部署或更新（自动停旧实例再起新的）
 #   ./9router.sh stop                 # 只停止容器
 #   ./9router.sh restart              # 只重启容器（强制重建，重读 .env）
-#   ./9router.sh status               # 状态 + 端口链 + 登录链路自检
+#   ./9router.sh status               # 状态 + 监听地址 + 端口链 + 登录链路自检
 #   ./9router.sh logs                 # 跟踪日志
 #   ./9router.sh reset-password [新密码]
+#
+#   NET_MODE=host ./9router.sh        # LXC 里 bridge 出网不通时用这个
 set -euo pipefail
 
-SCRIPT_VERSION="R1.0.0"
+SCRIPT_VERSION="R1.1.0"
 
 # ============ CONFIG（可用环境变量覆盖） ============
 DOMAIN="${DOMAIN:-9router.example.com}"
 BASE_DIR="${BASE_DIR:-/opt/9router}"
-PORT="${PORT:-15900}"           # 宿主侧端口；容器内固定 20128，改不动
-CTR_PORT="${CTR_PORT:-20128}"   # 官方镜像固定值，仅在镜像改版时才需要动
+# PORT 的含义随 NET_MODE 变化：
+#   bridge → 宿主侧端口（容器内固定 CTR_PORT，靠 docker-proxy 映射）
+#   host   → 唯一的监听端口：容器与宿主共用网络栈，只有这一个端口
+PORT="${PORT:-15900}"
+CTR_PORT="${CTR_PORT:-20128}"   # 官方镜像默认值，bridge 模式下用作容器内端口
 CONTAINER_NAME="${CONTAINER_NAME:-9router}"
 IMAGE="${IMAGE:-decolua/9router:latest}"
+# 网络模式：bridge（默认）| host
+#
+# 什么时候需要 NET_MODE=host：
+#   在 LXC 里跑 Docker 时（主机名 ct* / PVE 容器），bridge 的 NAT 出网经常是坏的
+#   —— 表现为容器内连 github.com 都超时，但宿主机一切正常。此时用 host 绕过整条
+#   NAT 路径。（本套件的出网自检就是专门抓这个的；workbuddy2api-manager 同样。）
+#
+# ⚠️ host 模式下的安全要点（与 workbuddy 那套不同，9Router 没有 LISTEN 变量）：
+#   host 模式没有网络隔离兜底，9Router 只能通过 PORT / HOSTNAME 两个环境变量
+#   控制绑定地址。而官方镜像的 Dockerfile 把 HOSTNAME=0.0.0.0 烤死了，只看 compose
+#   的 environment 会漏掉入口脚本里的那个 —— 一旦漏掉，网关会直接监听宿主机
+#   0.0.0.0:PORT，把「持有全部上游 OAuth token」的接口挂上公网。
+#   所以本脚本在 host 模式下：
+#     · 把 PORT 和 HOSTNAME 两个变量都显式写进 compose（不依赖镜像默认值）
+#     · 启动后【硬断言】实际监听地址必须是 127.0.0.1，是 0.0.0.0 就立即报警
+#   （已核对 Next 16.1.6 standalone 模板：hostname = process.env.HOSTNAME || '0.0.0.0'，
+#     确实是环境变量驱动，所以这条路可行。）
+NET_MODE="${NET_MODE:-bridge}"
+# Docker 网络名（仅 bridge 模式用；compose 派生名 = app_default）
+DOCKER_NET="${DOCKER_NET:-app_default}"
 # 首次登录密码。留空则自动生成随机密码并写入 .env（仅首次）。
 # ⚠️ 改这个变量【不会】改已部署实例的密码 —— 见上面「登录密码」一节，
 #    请用 ./9router.sh reset-password '新密码'
@@ -85,6 +110,7 @@ die()  { echo -e "${C_RED}[x]${C_OFF} $*" >&2; exit 1; }
 APP_DIR="$BASE_DIR/app"
 DATA_DIR="$BASE_DIR/data"
 ENV_FILE="$BASE_DIR/.env"
+MODE_FILE="$BASE_DIR/.net_mode"     # 记录当前网络模式（bridge/host），供模式切换检测
 COMPOSE_MARKER="# managed-by: 9router-deploy"
 
 # ─────────────────────────────────────────────────────────────
@@ -383,6 +409,124 @@ reset_password() {
   warn "旧数据没删，回滚：docker compose down → 把 $bak 恢复成 $DATA_DIR → up -d"
 }
 
+net_exposure_check() {
+  local p="$1" mode="$2"
+  local lines="" verdict=""
+
+  # ── 步骤 1：拿原始监听信息（仅用于展示 + 交叉验证）──
+  if command -v ss >/dev/null 2>&1; then
+    lines=$(ss -lnt 2>/dev/null | awk -v p=":${p}" '$4 ~ p"$"') || lines=""
+  fi
+  if [[ -z "$lines" ]] && command -v netstat >/dev/null 2>&1; then
+    lines=$(netstat -lnt 2>/dev/null | awk -v p=":${p}" '$4 ~ p"$"') || lines=""
+  fi
+
+  if [[ -n "$lines" ]]; then
+    echo "$lines" | sed 's/^/    /'
+    # 只认【会 accept 的通配地址】：0.0.0.0:PORT / *:PORT / [::]:PORT
+    # 端口映射规则产生的 [::1]:PORT 不算 —— 它只接受 IPv6 回环。
+    if echo "$lines" | grep -qE '(^|[[:space:]])(0\.0\.0\.0|\*):'"${p}"'([[:space:]]|$)|\[::\]:'"${p}"'([[:space:]]|$)'; then
+      verdict="exposed"
+    else
+      verdict="safe"
+    fi
+  else
+    echo "    （本机列不出监听表，以下为 TCP 实测结论）"
+  fi
+
+  # ── 步骤 2：TCP 实测（拿不到监听表时的兜底，也用于交叉验证）──
+  #   连得上非回环地址 → 外面真能进来。
+  #   ⚠️ 注意：极少数环境（如 iSH）会把非回环地址也路由回本机，
+  #      此时这个探测恒为"连得上"，需要靠步骤 1 的监听表纠正。
+  local rc=3
+  if command -v python3 >/dev/null 2>&1; then
+    python3 - "$p" <<'PY' || rc=$?
+import socket, sys
+port = int(sys.argv[1])
+
+ip = None
+# UDP connect 不真发包，只是让内核选源地址
+for probe in (("8.8.8.8", 80), ("1.1.1.1", 80)):
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(probe)
+        cand = s.getsockname()[0]
+        s.close()
+        if cand and not cand.startswith("127."):
+            ip = cand
+            break
+    except Exception:
+        continue
+
+if ip is None:
+    import subprocess
+    try:
+        out = subprocess.run(["hostname", "-I"], capture_output=True, text=True).stdout.split()
+        for cand in out:
+            if cand and not cand.startswith("127.") and "." in cand:
+                ip = cand
+                break
+    except Exception:
+        pass
+
+if ip is None:
+    sys.exit(2)          # 无法判定
+
+t = socket.socket()
+t.settimeout(1.0)
+try:
+    t.connect((ip, port))
+    sys.exit(0)          # 非回环可达
+except Exception:
+    sys.exit(1)          # 只有回环
+finally:
+    t.close()
+PY
+  fi
+
+  # ── 步骤 3：合并结论 ──
+  # 监听表能列出来时以它为准（它区分得了"绑定地址"），
+  # TCP 实测只用来补刀：实测"连不上"是强证据（一定是安全的）。
+  if [[ "$rc" == "1" ]]; then
+    log "  仅回环可达（127.0.0.1:${p}），符合预期"
+    return 0
+  fi
+
+  case "$verdict" in
+    exposed)
+      warn "  监听在通配地址上（0.0.0.0 / * / [::]）—— 已暴露公网！"
+      _expose_hint "$mode" "$p"
+      return 1
+      ;;
+    safe)
+      log "  仅绑定回环（127.0.0.1:${p}），符合预期"
+      return 0
+      ;;
+  esac
+
+  # 监听表拿不到，只能看 TCP 实测
+  if [[ "$rc" == "0" ]]; then
+    warn "  实测从非回环地址可连通 ${p} —— 已暴露公网！（本机列不出监听表，此为实测结论）"
+    _expose_hint "$mode" "$p"
+    return 1
+  fi
+
+  warn "  取不到非回环地址，无法判定监听范围（已跳过）"
+  return 0
+}
+
+_expose_hint() {
+  local mode="$1" p="$2"
+  if [[ "$mode" == "host" ]]; then
+    warn "  host 模式排查：确认 compose 的 environment 里显式写了 HOSTNAME: \"127.0.0.1\"。"
+    warn "    镜像的 Dockerfile 把 HOSTNAME=0.0.0.0 烤死了，不显式覆盖就会监听 0.0.0.0。"
+    warn "    改完必须 ./9router.sh restart（内部用 --force-recreate，环境变量只在创建时注入）。"
+    warn "  临时止血：iptables -I INPUT -p tcp --dport ${p} ! -s 127.0.0.1 -j DROP"
+  else
+    warn "  bridge 模式排查：ports 是不是被改成了 \"${p}:${CTR_PORT}\"（漏了 127.0.0.1: 前缀）"
+  fi
+}
+
 # ─────────────────────────────────────────────────────────────
 # 子命令
 # ─────────────────────────────────────────────────────────────
@@ -417,9 +561,14 @@ case "$CMD" in
     login_selftest "$PORT" "$(env_get INITIAL_PASSWORD || true)" || true
     echo "── 容器出网自检 ──"
     egress_selftest "$CONTAINER_NAME" "网关" || true
-    echo "── 暴露面检查 ──"
-    ss -lntp 2>/dev/null | grep -E "[:.]${CTR_PORT}\b|[:.]${PORT}\b" || true
-    echo "  ↑ ${PORT} 只应出现在 127.0.0.1 上；若看到 0.0.0.0 或 [::] 说明已暴露公网"
+    echo "── 监听地址自检（host 模式下这是最关键的一项）──"
+    net_exposure_check "$PORT" "$NET_MODE" || true
+    echo "── 网络模式 ──"
+    if [[ -f "$MODE_FILE" ]]; then
+      echo "  当前：$(tr -d ' \n' < "$MODE_FILE")（记录于 $MODE_FILE）"
+    else
+      echo "  当前：${NET_MODE}（还没记录过，下次 deploy 会写入）"
+    fi
     exit 0
     ;;
   reset-password|passwd)
@@ -447,10 +596,51 @@ docker compose version >/dev/null 2>&1 || die "未找到 docker compose v2 插�
 
 [[ "$PORT" =~ ^[0-9]+$ ]] || die "PORT 必须是数字"
 [[ "$CTR_PORT" =~ ^[0-9]+$ ]] || die "CTR_PORT 必须是数字"
-[[ "$PORT" != "$CTR_PORT" ]] || die "PORT 不能等于 CTR_PORT(${CTR_PORT})，会自相冲突"
+[[ "$NET_MODE" == "bridge" || "$NET_MODE" == "host" ]] || die "NET_MODE 只能是 bridge 或 host（当前：${NET_MODE}）"
+
+PREV_MODE=""
+
+# 目录必须先建出来：下面的模式记录文件写在 BASE_DIR 下
+mkdir -p "$APP_DIR" "$DATA_DIR"
+
+# ── 网络模式变更：必须清干净再重建 ──
+# bridge ↔ host 的切换不是改个字段就完事：
+#   · bridge 模式创建的容器带端口映射；切成 host 后那些映射会变成"宿主端口
+#     自己的监听"（docker-proxy 占着），新容器反而起不来，或者两套并存互相打架
+#   · 网络命名空间变了，旧容器必须删掉重建，不能就地改
+# 所以这里显式 down（含 --remove-orphans）+ 必要时删网络，再做切换。
+if [[ "$PREV_MODE" != "$NET_MODE" ]]; then
+  if [[ -n "$PREV_MODE" ]]; then
+    warn "检测到网络模式变更：${PREV_MODE} → ${NET_MODE}"
+    warn "  会重建整个容器栈（含 Docker 网络），以保证不残留旧模式的端口映射"
+  else
+    log "首次记录网络模式：${NET_MODE}"
+  fi
+  log "停止并清理旧容器栈"
+  compose_down "$APP_DIR" "$CONTAINER_NAME"
+
+  # 旧网络可能还挂着，删掉让 compose 重建
+  if docker network inspect "$DOCKER_NET" >/dev/null 2>&1; then
+    # 先确认网络里没别的容器在跑（别误删别人的）
+    local_users=$(docker network inspect "$DOCKER_NET" --format '{{len .Containers}}' 2>/dev/null || echo 0)
+    if [[ "$local_users" == "0" ]]; then
+      docker network rm "$DOCKER_NET" >/dev/null 2>&1 && log "已删除空网络 $DOCKER_NET" || true
+    else
+      warn "网络 $DOCKER_NET 里还有 ${local_users} 个容器，保持不动"
+    fi
+  fi
+  # 记录新模式（写进 compose 目录旁边的隐藏文件，随 .env 一起在 BASE_DIR）
+  printf '%s' "$NET_MODE" > "$MODE_FILE"
+fi
 
 # ─── 0. 停旧实例 ───
 stop_all || warn "端口仍被占用，稍后启动可能失败"
+
+# host 模式下只有 PORT 一个端口（容器与宿主共用网络栈）
+# bridge 模式下 PORT 是宿主侧，容器内为 CTR_PORT，可以同号
+if [[ "$NET_MODE" == "bridge" && "$PORT" == "$CTR_PORT" ]]; then
+  die "bridge 模式下 PORT 不能等于 CTR_PORT(${CTR_PORT})，会自相冲突"
+fi
 
 if port_busy "$PORT"; then
   owner=$(port_owner "$PORT" || true)
@@ -464,13 +654,14 @@ if port_busy "$PORT"; then
         docker rm -f ${CONTAINER_NAME}
         docker network prune -f
 
+  ■ 若你刚从 bridge 切到 host（或反过来）：旧容器的端口映射可能还挂在
+    宿主上，等几秒让 docker-proxy 退出，或手动 docker rm -f ${CONTAINER_NAME}
+
   ■ 想看清楚到底是谁占着：
         ss -lntp | grep ':${PORT}'
         lsof -iTCP:${PORT} -sTCP:LISTEN -P -n"
 fi
 log "端口 ${PORT} 已空闲"
-
-mkdir -p "$APP_DIR" "$DATA_DIR"
 
 # ─── 1. .env ───
 # 首次部署：生成随机密码。
@@ -506,7 +697,51 @@ if [[ -n "$OUTBOUND_PROXY" ]]; then
       NO_PROXY: \"localhost,127.0.0.1\""
 fi
 
-sync_compose "$APP_DIR" "9router" <<EOF
+if [[ "$NET_MODE" == "host" ]]; then
+# ── host 模式 ──
+# 容器与宿主共用网络栈，没有 docker-proxy 这一层，PORT 就是唯一端口。
+# 关键：把 HOSTNAME 从镜像烤死的 0.0.0.0 改成 127.0.0.1，否则网关直接暴露公网。
+sync_compose "$APP_DIR" "9router(host)" <<EOF
+$COMPOSE_MARKER
+services:
+  9router:
+    image: ${IMAGE}
+    container_name: ${CONTAINER_NAME}
+    restart: unless-stopped
+    # 绕过 LXC 里坏掉的 bridge NAT（容器内连不上外网 → 上游全部不可用）
+    network_mode: host
+    environment:
+      TZ: ${TZ_NAME}
+      DATA_DIR: /app/data
+      # ⚠️ 这两个变量是 host 模式下的【唯一防线】，一个都不能少：
+      #   PORT     —— 容器与宿主共用网络栈，这个端口就是宿主端口
+      #   HOSTNAME —— 官方镜像的 Dockerfile 把 HOSTNAME=0.0.0.0 烤进了镜像，
+      #               environment 里不写就会用镜像默认值 → 监听 0.0.0.0 → 暴露公网。
+      #               （Next standalone 模板：hostname = process.env.HOSTNAME || '0.0.0.0'）
+      # 改完这两个值必须 --force-recreate：环境变量是【创建容器时】注入的。
+      PORT: "${PORT}"
+      HOSTNAME: "127.0.0.1"
+      NODE_ENV: production
+      # 首次启动的登录密码（只在没有密码 hash 时生效）。
+      # 不设这行 = 远程登录直接被 403 拒绝，详见脚本头部说明。
+      INITIAL_PASSWORD: "${PANEL_PASSWORD}"
+      REQUIRE_API_KEY: "${REQUIRE_API_KEY}"
+      # 反代走 HTTPS → 认证 cookie 必须带 Secure。
+      AUTH_COOKIE_SECURE: "${SECURE_COOKIE}"
+      ENABLE_REQUEST_LOGS: "false"
+${PROXY_BLOCK}
+    volumes:
+      - ${DATA_DIR}:/app/data
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- --timeout=3 http://127.0.0.1:${PORT}/api/health >/dev/null 2>&1 || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+EOF
+else
+# ── bridge 模式（默认）──
+sync_compose "$APP_DIR" "9router(bridge)" <<EOF
 $COMPOSE_MARKER
 services:
   9router:
@@ -547,6 +782,7 @@ ${PROXY_BLOCK}
       retries: 3
       start_period: 30s
 EOF
+fi
 
 # ─── 3. 拉镜像 ───
 if [[ "$PULL_IMAGE" == "1" ]]; then
@@ -580,15 +816,9 @@ echo "── 容器出网自检（连不上上游就没法转发）──"
 egress_selftest "$CONTAINER_NAME" "网关" || true
 
 echo
-echo "── 暴露面检查 ──"
-if ss -lntp 2>/dev/null | grep -qE "[:.]${PORT}\b"; then
-  if ss -lntp 2>/dev/null | grep -E "[:.]${PORT}\b" | grep -qE "0\.0\.0\.0|\[::\]"; then
-    warn "检测到 ${PORT} 监听在 0.0.0.0 —— 已暴露公网！"
-    warn "  检查 compose 的 ports 是否被改过（官方默认写的就是 0.0.0.0，本脚本已改成 127.0.0.1）"
-  else
-    log "${PORT} 仅绑定回环（127.0.0.1），符合预期"
-  fi
-fi
+echo "── 监听地址自检（host 模式下这是最关键的一项）──"
+EXPOSE_OK=1
+net_exposure_check "$PORT" "$NET_MODE" || EXPOSE_OK=0
 
 if [[ "$CHAIN_OK" != "1" ]]; then
   echo
@@ -596,7 +826,6 @@ if [[ "$CHAIN_OK" != "1" ]]; then
   warn "  · docker logs --tail 50 ${CONTAINER_NAME}"
   warn "  · 容器可能还没起完（Next.js 冷启动 10~30s，等一会儿再跑 status）"
 fi
-
 cat <<EOF
 
 ============================================================
