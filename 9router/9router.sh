@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 9Router 部署 / 更新脚本 R1.0.0
+# 9Router 部署 / 更新脚本 R1.1.1
 #
 # 版本记录见同目录 README.md 末尾「版本记录」表。
 # 适用：1Panel 服务器（Docker + docker compose v2），amd64 / arm64
@@ -51,7 +51,7 @@
 #   NET_MODE=host ./9router.sh        # LXC 里 bridge 出网不通时用这个
 set -euo pipefail
 
-SCRIPT_VERSION="R1.1.0"
+SCRIPT_VERSION="R1.1.1"
 
 # ============ CONFIG（可用环境变量覆盖） ============
 DOMAIN="${DOMAIN:-9router.example.com}"
@@ -239,19 +239,121 @@ login_selftest() {
 }
 
 # ─────────────────────────────────────────────────────────────
-# 自检：容器出网（连不上上游就没法转发）
+# 自检：上游可达性
+#
+# ⚠️ 探针必须打【真实的 LLM 上游域名】，不能拿随便一个大站当标准。
+#    R1.1.0 之前这里探的是 api.github.com（失败再退到 www.baidu.com），
+#    结果在一台能连 OpenAI/Anthropic、但连不上 github/百度的机器上
+#    报了假警报 —— 用户白排查一轮。判定"有没有网"必须用用户真正要连的目标。
+#
+#    上游域名取自 9Router 自己的 provider registry
+#    （open-sse/providers/registry/*.js 里的 baseUrl），不是我猜的。
+#
+# 判定标准：【任何 HTTP 状态码都算通】。403/404/421 只说明服务器正常应答了，
+# TCP+TLS 链路是完整的；只有连不上 / 超时 / DNS 失败才算不通。
 # ─────────────────────────────────────────────────────────────
-egress_selftest() {
-  local name="$1" label="$2"
-  printf '  %s出网: ' "$label"
-  docker ps --format '{{.Names}}' | grep -qx "$name" || { echo "容器未运行"; return 1; }
-  if docker exec "$name" sh -c 'wget -qO- --timeout=6 https://api.github.com/zen >/dev/null 2>&1 || wget -qO- --timeout=6 https://www.baidu.com >/dev/null 2>&1'; then
-    echo "OK"
+
+# 上游清单： label|URL
+# 挑的是 9Router 常用上游，且域名各自独立（能覆盖不同的出站策略）
+UPSTREAM_PROBES=(
+  "OpenAI|https://api.openai.com"
+  "Anthropic|https://api.anthropic.com"
+  "OpenRouter|https://openrouter.ai/api/v1"
+  "Google Gemini|https://generativelanguage.googleapis.com"
+  "DeepSeek|https://api.deepseek.com"
+  "GitHub|https://api.github.com"
+)
+
+# 探一个 URL，只看"能不能连上"。
+#   0 = 连上了（任何 HTTP 码）   1 = 连不上/超时/DNS 失败
+# 用 wget 而不是 curl：官方镜像基于 Alpine，wget 一定在；curl 不一定。
+_probe_url() {
+  local url="$1" timeout="${2:-8}"
+  # wget 对 4xx/5xx 会返回非 0，所以不能拿退出码当判据 —— 要看有没有回显
+  # 到 "HTTP/" 或 "saving to" 之类的握手痕迹。这里用 -S 把响应头打到 stderr，
+  # 只要出现过 HTTP/x.x 就说明握手成功。
+  local out
+  out=$(wget -S -O /dev/null --timeout="$timeout" --tries=1 "$url" 2>&1) || true
+  if printf '%s' "$out" | grep -qE 'HTTP/[0-9]\.[0-9]|Misdirected Request|server returned error'; then
     return 0
   fi
-  echo "不通（LXC 里 Docker bridge NAT 出网坏掉是常见原因）"
   return 1
 }
+
+egress_selftest() {
+  local name="$1" label="$2"
+  local ok=0 fail=0 line name_l url
+  local failed_list=""
+
+  printf '  %s上游可达性: ' "$label"
+  docker ps --format '{{.Names}}' | grep -qx "$name" || { echo "容器未运行"; return 1; }
+
+  for line in "${UPSTREAM_PROBES[@]}"; do
+    name_l="${line%%|*}"
+    url="${line##*|}"
+    if _probe_url "$url" 8; then
+      ok=$((ok + 1))
+    else
+      fail=$((fail + 1))
+      failed_list="${failed_list}${name_l} "
+    fi
+  done
+
+  if [[ "$fail" == "0" ]]; then
+    echo "全部 ${ok} 个上游可达"
+    return 0
+  fi
+
+  echo "${ok} 个可达 / ${fail} 个不可达"
+  echo "      ❌ 不可达：${failed_list}"
+  if [[ "$ok" == "0" ]]; then
+    warn "     全部上游都连不上 —— 这台机器确实出不了网"
+    warn "     · 先确认宿主机自己能不能连（curl -I https://api.openai.com）"
+    warn "     · 宿主机也不通 = 机器网络/防火墙问题，与 Docker 无关"
+    warn "     · 宿主机通、容器不通 = 试试 NET_MODE=host 绕过 bridge NAT"
+  else
+    warn "     部分上游不可达。9Router 只能转发【可达】的那几家，"
+    warn "     配置上游时请优先选上面 ✅ 可达的（连不通的连了也只会一直报错）。"
+  fi
+  # 全部不可达时顺手区分一下 DNS / 路由，省得再问一轮
+  if [[ "$ok" == "0" ]]; then
+    egress_diagnose "$name" || true
+  fi
+  return 1
+}
+
+# 在容器里探一个 URL（同 _probe_url 的判据）
+_docker_probe() {
+  local name="$1" url="$2" timeout="${3:-8}"
+  docker exec "$name" sh -c \
+    "wget -S -O /dev/null --timeout=${timeout} --tries=1 '${url}' 2>&1 | grep -qE 'HTTP/[0-9]\.[0-9]|Misdirected Request|server returned error'" \
+    2>/dev/null
+}
+
+# DNS vs 路由 的区分诊断：解析得到但连不上 = 路由/防火墙问题
+egress_diagnose() {
+  local name="$1"
+  local host="api.openai.com"
+  printf '  DNS 解析 %s: ' "$host"
+  local ip
+  ip=$(docker exec "$name" sh -c "getent hosts ${host} 2>/dev/null | head -1 | awk '{print \$1}'" 2>/dev/null || true)
+  if [[ -z "$ip" ]]; then
+    echo "解析失败 → DNS 问题"
+    warn "     容器内的 /etc/resolv.conf 指向的 DNS 不可达。"
+    warn "     host 模式下容器用的是宿主的 resolv.conf，先查宿主机能不能解析："
+    warn "       getent hosts ${host}"
+    return 1
+  fi
+  echo "$ip"
+  if _docker_probe "$name" "http://${ip}" 4; then
+    log "     且用 IP 直连可达 → 说明网络通，问题只在 DNS 解析环节"
+  else
+    warn "     但用 IP 直连也不可达 → 是路由/防火墙在拦（不是 DNS 问题）"
+    warn "     这种只能从机器/网关层面放行，9Router 本身绕不过去"
+  fi
+  return 0
+}
+
 
 # ─────────────────────────────────────────────────────────────
 # 停止
@@ -556,7 +658,7 @@ case "$CMD" in
     echo "── 端口占用 ──"
     if port_busy "$PORT"; then echo "  ${PORT}: 占用中  $(port_owner "$PORT")"; else echo "  ${PORT}: 空闲"; fi
     echo "── 端口链自检 ──"
-    check_port_chain "$CONTAINER_NAME" "$PORT" "$CTR_PORT" "/api/health" "网关" || true
+    check_port_chain "$CONTAINER_NAME" "$PORT" "$(_ctr_port)" "/api/health" "网关" || true
     echo "── 登录链路自检 ──"
     login_selftest "$PORT" "$(env_get INITIAL_PASSWORD || true)" || true
     echo "── 容器出网自检 ──"
@@ -589,8 +691,20 @@ case "$CMD" in
   *) die "未知子命令：$CMD（可用：deploy / update / stop / restart / status / logs / reset-password）" ;;
 esac
 
-# ============ 以下是部署主流程 ============
-[[ $EUID -eq 0 ]] || die "请用 root 运行（或 sudo ./9router.sh）"
+# 容器内实际监听的端口。
+#   bridge → 容器内固定 CTR_PORT（20128），靠端口映射对外
+#   host   → 容器与宿主共用网络栈，端口就是 PORT
+# ⚠️ 探「容器内」时必须用这个，不能直接用 CTR_PORT：host 模式下 20128 上
+#    什么都没有，会探出假的"容器内不通"。
+_ctr_port() {
+  if [[ "${NET_MODE:-bridge}" == "host" ]]; then
+    printf '%s' "$PORT"
+  else
+    printf '%s' "$CTR_PORT"
+  fi
+}
+
+# ============ 以下是部署主流程 ============[[ $EUID -eq 0 ]] || die "请用 root 运行（或 sudo ./9router.sh）"
 command -v docker >/dev/null || die "未找到 docker，请先在 1Panel 安装"
 docker compose version >/dev/null 2>&1 || die "未找到 docker compose v2 插件"
 
@@ -805,14 +919,14 @@ echo "  ${CONTAINER_NAME}: $(docker port "$CONTAINER_NAME" 2>/dev/null | tr '\n'
 echo
 echo "── 端口链自检（宿主 → 容器）──"
 CHAIN_OK=1
-check_port_chain "$CONTAINER_NAME" "$PORT" "$CTR_PORT" "/api/health" "网关" || CHAIN_OK=0
+check_port_chain "$CONTAINER_NAME" "$PORT" "$(_ctr_port)" "/api/health" "网关" || CHAIN_OK=0
 
 echo
 echo "── 登录链路自检 ──"
 login_selftest "$PORT" "$PANEL_PASSWORD" || true
 
 echo
-echo "── 容器出网自检（连不上上游就没法转发）──"
+echo "── 上游可达性自检 ──"
 egress_selftest "$CONTAINER_NAME" "网关" || true
 
 echo
@@ -858,7 +972,7 @@ cat <<EOF
 ============================================================
   凭据
 ============================================================
-  网关地址    : http://127.0.0.1:${PORT}   （容器内 ${CTR_PORT}）
+  网关地址    : http://127.0.0.1:${PORT}$( [[ "$NET_MODE" == "host" ]] && printf '   （host 模式，容器内同端口）' || printf '   （容器内 %s）' "$CTR_PORT" )
   外部访问    : https://${DOMAIN}:18443 （配好 Caddy 后）
   OpenAI 兼容 : https://${DOMAIN}:18443/v1
   登录密码    : ${PANEL_PASSWORD} ${PWD_NOTE}
@@ -874,7 +988,7 @@ cat <<EOF
 ============================================================
 
   日常命令：
-    ./9router.sh status              状态 + 端口链 + 登录链路 + 暴露面自检
+    ./9router.sh status              状态 + 端口链 + 登录链路 + 上游可达性 + 监听地址自检
     ./9router.sh logs                跟踪日志
     ./9router.sh restart             强制重建容器（重读 .env）
     ./9router.sh stop                停止容器
