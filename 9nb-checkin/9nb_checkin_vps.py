@@ -45,8 +45,16 @@ ACCOUNTS = [
     # ("user3", "你的密码"),
 ]
 
-# 账号之间随机等待的秒数范围（避免同 IP 短时间多次登录）
-JITTER_RANGE = (0, 300)
+# 账号之间的等待策略（秒）
+# 三个账号的节奏：第一个在 0~180 秒内随机进场；
+# 第二个在「第一个签到成功」之后 15 分钟 + 0~60 秒随机；
+# 第三个在「第二个签到成功」之后 10 分钟 + 0~60 秒随机。
+# 基准是上一个账号**签到成功的时刻**，所以等待发生在上一个账号处理完之后。
+FIRST_MAX_WAIT = 180          # 账号1：0~180 秒随机
+SECOND_BASE_WAIT = 15 * 60    # 账号2：前一个成功后 15 分钟
+SECOND_JITTER = 60            # 账号2：额外 0~60 秒随机
+THIRD_BASE_WAIT = 10 * 60     # 账号3：前一个成功后 10 分钟
+THIRD_JITTER = 60             # 账号3：额外 0~60 秒随机
 
 # Cookie 缓存文件：登录成功后保存，避免每次都重新登录
 COOKIE_FILE = os.path.expanduser("~/.9nb_cookies.json")
@@ -474,7 +482,8 @@ def cmd_del(username):
 def main():
     ap = argparse.ArgumentParser(description="9NB.DE 自动签到")
     ap.add_argument("--dry-run", action="store_true", help="只测试登录，不签到")
-    ap.add_argument("--no-jitter", action="store_true", help="账号间不随机等待")
+    ap.add_argument("--no-jitter", action="store_true",
+                    help="不加任何等待，三个账号连续签到（默认会拉长到约 27 分钟）")
     ap.add_argument("--account", help="只处理指定账号")
     ap.add_argument("--add", metavar="用户名:密码", help="保存一个账号到配置文件")
     ap.add_argument("--list", action="store_true", help="列出已保存的账号")
@@ -534,9 +543,11 @@ def main():
 
     for i, (username, password) in enumerate(accounts):
         print(f"\n===== 账号 {i + 1}/{len(accounts)}：{username} =====")
-        if i > 0 and not args.no_jitter:
-            wait = random.randint(*JITTER_RANGE)
-            print(f"[{username}] 随机等待 {wait} 秒...")
+
+        # 账号1：进场前随机等 0~180 秒
+        if i == 0 and not args.no_jitter:
+            wait = random.randint(0, FIRST_MAX_WAIT)
+            print(f"[{username}] 随机等待 {wait} 秒后开始（0~{FIRST_MAX_WAIT} 秒内）")
             time.sleep(wait)
 
         cookie = cached.get(username, {}).get("cookie", "")
@@ -615,6 +626,19 @@ def main():
                 f"积分：{after or before or '未知'}{delta}")
         print(f"✅ {line}")
         results.append(line)
+
+        # 等下一个账号：基准是本账号**签到成功的此刻**，加上固定间隔与随机抖动。
+        if not args.no_jitter and i + 1 < len(accounts):
+            if i == 0:
+                base, jit = SECOND_BASE_WAIT, SECOND_JITTER
+            else:
+                base, jit = THIRD_BASE_WAIT, THIRD_JITTER
+            wait = base + random.randint(0, jit)
+            nxt = accounts[i + 1][0]
+            mins, secs = divmod(wait, 60)
+            print(f"[{nxt}] 将在 {mins} 分 {secs} 秒后签到"
+                  f"（间隔 {base // 60} 分 + 随机 0~{jit} 秒）")
+            time.sleep(wait)
 
     summary = "9NB签到结果\n" + "\n".join(results)
     print("\n" + summary)
