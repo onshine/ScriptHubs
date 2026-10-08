@@ -32,7 +32,7 @@
 #   ./workbuddy2api.sh logs                 # 跟踪日志
 set -euo pipefail
 
-SCRIPT_VERSION="R1.0.2"
+SCRIPT_VERSION="R1.0.3"
 
 # ============ CONFIG（可用环境变量覆盖） ============
 DOMAIN="${DOMAIN:-workbuddy.example.com}"
@@ -57,6 +57,14 @@ GW_CTR_PORT="${GW_CTR_PORT:-$GW_PORT}"
 #   ⚠️ 注意：WB_MANAGER_HOST / WB_MANAGER_PORT 都是**死配置**
 #      （config.py 定义但从不传给 uvicorn），唯一有效的办法是覆盖 command。
 NET_MODE="${NET_MODE:-bridge}"
+# bridge 模式下，面板与网关共用的自定义docker 网络名。
+# 存在的意义：两个容器各自独立的 default 网络互不相通，而网关端口只绑宿主
+# 127.0.0.1，面板无法通过 host.docker.internal 访问。放进同一网络后用容器名互访。
+SHARED_NET="${SHARED_NET:-workbuddy-net}"
+# 宿主 docker 组的 GID。面板容器挂载了 docker.sock 换取「一键更新」能力，
+# 但容器以 uid=10001 运行、不在 docker 组 → 需要 group_add 补组。
+# ⚠️ 各机器 GID 不同（实测 firadio=995、Yuusei=989），必须动态探测，不能写死。
+DOCKER_GID="${DOCKER_GID:-$(getent group docker 2>/dev/null | cut -d: -f3)}"
 # 走 HTTPS 域名访问 → true。
 # 不用 auto：auto 依赖反代透传 X-Forwarded-Proto，一旦中间链路变了而没传，
 # 会静默降级为不带 Secure ——「以为安全其实没有」比明确报错更危险。
@@ -588,6 +596,10 @@ services:
       - ./config.json:/app/config.json
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    # 与面板共用自定义网络，面板才能用容器名访问本网关（见文件末尾 networks）
+    networks:
+      - default
+      - ${SHARED_NET}
     # 官方镜像的 healthcheck 写死探测 127.0.0.1:7863/healthz，与本脚本设定的
     # 容器内端口 ${GW_CTR_PORT} 不一致 → 容器永远 unhealthy（服务本身是好的）。
     # ⚠️ 危害不是"显示红色"这么简单：告警会彻底失效，将来真挂了也看不出来。
@@ -597,6 +609,11 @@ services:
       timeout: 5s
       retries: 3
       start_period: 10s
+
+networks:
+  ${SHARED_NET}:
+    external: true
+    # 由脚本预先 docker network create 创建；面板和网关都接入
 EOF
 fi
 
@@ -614,14 +631,22 @@ PANEL_BASE_URL="http://127.0.0.1:${GW_CTR_PORT}"
 PANEL_PORTS_BLOCK=""
 PANEL_EXTRA_HOSTS=""
 else
+# ⚠️ bridge 模式下【不能】用 host.docker.internal 访问网关：
+#   两个容器各自在独立的 default 网络里，host.docker.internal 解析到
+#   172.17.0.1(docker0)，而网关端口只绑了宿主的 127.0.0.1 → 连不上。
+#   （host 模式下能用，是因为两个容器共享宿主网络栈。）
+#   正解：把两个容器放进同一个自定义网络，面板用【容器名】访问网关，
+#   走 docker 内建 DNS，端口依然只绑宿主回环，不对外暴露。
 PANEL_NET_BLOCK=""
-PANEL_BASE_URL="http://host.docker.internal:${GW_PORT}"
+PANEL_BASE_URL="http://${GW_NAME}:${GW_CTR_PORT}"
 PANEL_PORTS_BLOCK="    ports:
       # 宿主 ${PANEL_PORT} → 容器 ${PANEL_CTR_PORT}（官方镜像默认端口，改不动）
       # 只绑本机：面板持有全部账号凭证，必须藏在反代后面
       - \"127.0.0.1:${PANEL_PORT}:${PANEL_CTR_PORT}\""
-PANEL_EXTRA_HOSTS="    extra_hosts:
-      - \"host.docker.internal:host-gateway\""
+PANEL_EXTRA_HOSTS="    # 与网关共用自定义网络，用容器名互访（见文件末尾 networks 顶层定义）
+    networks:
+      - default
+      - ${SHARED_NET}"
 fi
 
 sync_compose "$PANEL_DIR" "面板" <<EOF
@@ -656,20 +681,45 @@ ${PANEL_PORTS_BLOCK}
       # 不想要就注释掉，相关功能会自动降级为界面提示
       - /var/run/docker.sock:/var/run/docker.sock
 ${PANEL_EXTRA_HOSTS}
+    # socket 属主 root:docker(<宿主 GID>) 660，容器 uid=10001 非 root 且不在
+    # docker 组，只挂 socket 会 permission denied（界面误报为"未挂载"）。
+    # 补组权限让已挂的 socket 真正生效。GID 以宿主 getent group docker 为准。
+    group_add:
+      - "${DOCKER_GID}"
     # 官方镜像的 healthcheck 写死探测容器内 7864，端口改了会一直 unhealthy，
     # 所以这里覆盖成实际端口。
+    # ⚠️ bridge 模式下面板【容器内】监听的是 ${PANEL_CTR_PORT}，不是宿主端口
+    #    ${PANEL_PORT}；写错探针会永远连不上 → 容器永久 unhealthy（服务其实好的）。
+    #    危害不止"显示红色"：告警彻底失效，将来真挂了也看不出来。
     healthcheck:
-      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:${PANEL_PORT}/api/healthz"]
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:${PANEL_CTR_PORT}/api/healthz"]
       interval: 30s
       timeout: 5s
       retries: 3
       start_period: 20s
+
+networks:
+  ${SHARED_NET}:
+    external: true
 EOF
 
 # ─── 4. 权限（漏了会出现「账号数为 0 且重启无效」）───
 log "修正数据目录属主为 10001（两个容器的运行 uid）"
 chown -R 10001:10001 "$GW_DIR/auths" "$GW_DIR/data" "$PANEL_DIR/data"
 chmod 700 "$GW_DIR/auths"
+
+# ─── 4b. 共享网络（仅 bridge 模式）───
+# 面板与网关必须能互通，否则界面显示「上游连接：不可用」。
+# host 模式共享宿主网络栈，不需要；bridge 模式各自独立网络，必须显式互联。
+if [[ "$NET_MODE" != "host" ]]; then
+  if ! docker network inspect "$SHARED_NET" >/dev/null 2>&1; then
+    log "创建共享网络 $SHARED_NET"
+    docker network create "$SHARED_NET" >/dev/null
+  else
+    log "共享网络 $SHARED_NET 已存在"
+  fi
+  # compose 用 external: true 引用它，所以必须先建好，否则报 undefined network
+fi
 
 # ─── 5. 拉镜像（可选）───
 if [[ "$PULL_IMAGE" == "1" ]]; then
@@ -712,6 +762,31 @@ echo
 echo "── 登录链路自检 ──"
 LOGIN_OK=1
 login_selftest "$PANEL_PORT" || LOGIN_OK=0
+
+# 面板 → 网关 连通性（bridge 模式最容易漏的一项，漏了界面显示「上游不可用」）
+echo
+echo "── 面板 → 上游连通性 ──"
+if [[ "$NET_MODE" == "host" ]]; then
+  UPSTREAM_PROBE_URL="http://127.0.0.1:${GW_CTR_PORT}/healthz"
+else
+  UPSTREAM_PROBE_URL="http://${GW_NAME}:${GW_CTR_PORT}/healthz"
+fi
+UPSTREAM_CODE=$(docker exec "$PANEL_NAME" curl -s -o /dev/null -w '%{http_code}' \
+  --max-time 8 "$UPSTREAM_PROBE_URL" 2>/dev/null || echo "000")
+if [[ "$UPSTREAM_CODE" == "200" ]]; then
+  log "面板能访问网关（$UPSTREAM_PROBE_URL → 200）"
+else
+  warn "面板【无法】访问网关（$UPSTREAM_PROBE_URL → ${UPSTREAM_CODE}）"
+  warn "  → 界面会显示「上游连接：不可用」"
+  if [[ "$NET_MODE" == "host" ]]; then
+    warn "  → host 模式下两个容器共享宿主网络栈，检查网关是否在监听 ${GW_CTR_PORT}"
+  else
+    warn "  → bridge 模式常见原因：两个容器不在同一自定义网络"
+    warn "        确认 compose 里两个服务都接入了 $SHARED_NET，且该网络已存在："
+    warn "        docker network inspect $SHARED_NET"
+    warn "        docker exec $PANEL_NAME getent hosts $GW_NAME"
+  fi
+fi
 
 echo
 echo "── 容器出网自检（连不上腾讯就没法转发）──"
