@@ -1,10 +1,16 @@
 /***************************************************************
  *  车来了 去广告  |  Loon http-response 脚本
  *  ------------------------------------------------------------
- *  SCRIPT_VERSION : R1.0.0
+ *  SCRIPT_VERSION : R1.0.1
  *  适配           : 车来了 iOS App（*.chelaile.net.cn / *.chelaileapp.cn 系接口）
  *  能力           : 去开屏广告、去插屏广告、去首页金刚位推广、去详情页信息流、
  *                   去公告/活动弹窗、去 LED 天气条、清空广告 SDK 投放任务
+ *
+ *  R1.0.1 变更（据 2026-10-10 实测 HAR）：
+ *    · 补上开屏广告真正的下发接口 ssp.yg84.com/ssp/ad/list
+ *      —— adx.yg84.com 只是 SDK 调度层，素材由 ssp 下发，只拦 adx 拦不住开屏
+ *    · sdk/ad/setting 的 data 本身是数组，改用 [] 清空（原写成 {} 结构不对）
+ *    · 增加 ssp.yg84.com/ssp/tracking/* 曝光埋点处理
  *
  *  关键点（改脚本前务必读）：
  *    车来了的接口响应体几乎都被  **YGKJ{...}YGKJ##  （少数旧接口是 YGKJ**）包裹。
@@ -18,15 +24,16 @@
  *    · 所有开关来自插件 [Argument]，未传参时按默认值工作
  ***************************************************************/
 
-const SCRIPT_VERSION = "R1.0.0";
+const SCRIPT_VERSION = "R1.0.1";
 
 /* ------------------------------------------------------------------
  * 0. 开关与参数
  * ------------------------------------------------------------------ */
 const DEFAULTS = {
   remove_splash: true,     // 清洗启动配置：开屏 / 插屏 / 预加载广告
+  remove_ad_sdk: true,     // 掐断 yg84 广告 SDK（adx 调度层 + ssp 素材下发）
   remove_home_grid: true,  // 首页金刚位推广、我的页面推广位
-  remove_feed: true,       // 详情页信息流 / 文章推荐 / 广告 SDK
+  remove_feed: true,       // 详情页信息流 / 文章推荐
   remove_notice: true,     // 公告、活动、LED 天气条
   block_httpdns: true,     // 移除 useHttpDns / appBackupDomains，防止绕过分流
   debug: false
@@ -274,13 +281,52 @@ function cleanAdSdk(body) {
       }
     }
   } else if (/\/sdk\/ad\/setting/i.test(url)) {
-    if (obj.data && typeof obj.data === "object" && Object.keys(obj.data).length) { obj.data = {}; changed = true; }
+    // 实测该接口返回 {"data":[{sdkName:"gdt"|"csj"|"bd"|"gm",...}],"code":0,"netStrategyEnable":1}
+    // data 是「已启用的广告网络列表」，清空即无广告网络可用。注意 data 本身是数组。
+    if (Array.isArray(obj.data)) {
+      if (obj.data.length) { obj.data = []; changed = true; }
+    } else if (obj.data && typeof obj.data === "object" && Object.keys(obj.data).length) {
+      obj.data = []; changed = true;
+    }
   } else if (/\/sdk\/ad\/init/i.test(url)) {
     if (obj.data && typeof obj.data === "object" && Array.isArray(obj.data.caches)) { obj.data.caches = []; changed = true; }
   }
   if (!changed) return null;
   log("广告 SDK：已清空投放任务");
   return JSON.stringify(obj);
+}
+
+/* --- 2.5 开屏广告素材下发（ssp.yg84.com）★ R1.0.1 新增 ---------------
+ * 实测（2026-10-10 HAR）开屏广告的链路是：
+ *   1) adx.yg84.com/sdk/ad/get    → SDK 调度层下发「投放任务」
+ *   2) ssp.yg84.com/ssp/ad/list   → 真正下发广告素材  ← 开屏广告本体在这
+ *   3) ctrace.yg84.com/thirdSimple… ×N → 曝光/回调埋点
+ *
+ * 所以只拦 adx 是拦不住开屏的，必须把 ssp 的素材列表清空。
+ * /ssp/ad/list 返回形如 {"code":0,"data":[{pic,link,duration,width,height,...}],"message":"…"}
+ * 清成 {"code":0,"data":[]} —— SDK 视为「无填充」，安静跳过开屏，不会转圈。
+ */
+function cleanSsp(body) {
+  const url = ($request && $request.url) || "";
+
+  // 曝光/点击埋点：返回空 200 即可，不必解析
+  if (/\/ssp\/tracking\//i.test(url)) {
+    log("ssp 曝光埋点：已吞掉");
+    return "";
+  }
+
+  // 素材列表：清空 data
+  let obj;
+  try { obj = JSON.parse(body); } catch (_) { return null; }
+  if (!obj || typeof obj !== "object") return null;
+
+  if (Array.isArray(obj.data)) {
+    if (!obj.data.length) { log("ssp 素材列表：本来就是空的"); return null; }
+    obj.data = [];
+    log(`ssp 素材列表：已清空 ${body.length} 字节的广告素材`);
+    return JSON.stringify({ code: obj.code === undefined ? 0 : obj.code, data: [], message: obj.message || "no ad" });
+  }
+  return null;
 }
 
 /* ------------------------------------------------------------------
@@ -300,8 +346,10 @@ const ROUTES = [
   { re: /\/goocity\/config\/notices(\?|$)/i,              fn: emptyDataFn,    need: "remove_notice" },
   { re: /\/encourage\/activity\/control(\?|$)/i,          fn: emptyDataFn,    need: "remove_notice" },
   { re: /\/led-weather\/[^/]*\/condition_brief(\?|$)/i,   fn: emptyDataFn,    need: "remove_notice" },
-  // 广告 SDK（非 YGKJ 包裹，单独处理）
-  { re: /^https?:\/\/adx\.yg84\.com\/sdk\/ad\//i,         fn: cleanAdSdk,     need: "remove_feed" }
+  // 广告 SDK（非 YGKJ 包裹，单独处理）—— 开屏广告的真正来源
+  { re: /\/ssp\/ad\/list(\?|$)/i,                          fn: cleanSsp,       need: "remove_ad_sdk" },
+  { re: /\/ssp\/tracking\//i,                              fn: cleanSsp,       need: "remove_ad_sdk" },
+  { re: /^https?:\/\/adx\.yg84\.com\/sdk\/ad\//i,          fn: cleanAdSdk,     need: "remove_ad_sdk" }
 ];
 
 /** 把 jsonr.data 清空的通用处理器（包一层以适配 ROUTES 统一签名） */
@@ -331,7 +379,8 @@ function emptyDataFn(body) {
     if (!CFG[r.need]) { log("命中但开关已关：", r.need); return done({}); }
     let out = null;
     try { out = r.fn(body); } catch (e) { log("处理异常，放行原响应：", e && e.message); out = null; }
-    if (out && out !== body) return done({ body: out });
+    // 注意用 !== null/undefined 判断：埋点类处理器会刻意返回空字符串 "" 来清空 body
+    if (out !== null && out !== undefined && out !== body) return done({ body: out });
     return done({});
   }
   return done({});

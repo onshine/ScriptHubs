@@ -4,7 +4,7 @@
 
 - 插件：`CheLaiLe_Ads.plugin`
 - 脚本：`chelaile-ads.js`
-- 版本：**R1.0.0**
+- 版本：**R1.0.1**
 
 ---
 
@@ -44,6 +44,53 @@ adx.yg84.com/sdk/ad/{get,setting,init}             ← 广告 SDK（投放任务
 
 ---
 
+## ★ 关键补充一：开屏广告的另一条链路 —— yg84 广告 SDK
+
+我最初的版本只拦到了 `adx.yg84.com`，结果**应用内广告全没了、开屏广告还在**。抓包（2026-10-10 实测 HAR）之后才看清：车来了把开屏广告外包给了 **yg84 广告 SDK**（一个聚合了穿山甲/优量汇/百度的第三方广告平台），一次冷启动的完整链路是：
+
+```
+1) adx.yg84.com/sdk/ad/init      79KB  SDK 初始化 + 广告缓存
+2) adx.yg84.com/sdk/ad/setting   ────  「已启用的广告网络列表」→ gdt / csj / bd / gm
+3) adx.yg84.com/sdk/ad/appList   ────  目标 App 的 deep-link 映射表（定向用）
+4) adx.yg84.com/sdk/ad/get       54KB  SDK 调度层下发「投放任务」
+5) ssp.yg84.com/ssp/ad/list      54KB  ★ 真正下发广告素材 ← 开屏广告本体在这
+6) ctrace.yg84.com/thirdSimple… ×61    曝光/回调埋点
+7) ssp.yg84.com/ssp/tracking/*         曝光确认
+```
+
+**关键点：`adx` 只是调度层，素材由 `ssp` 下发。** 只清 `adx` 的 tasks，SDK 仍可能走 `ssp` 取到广告 —— 这就是「应用内干净了、开屏还在」的原因。
+
+R1.0.1 的处理：
+
+| 接口 | 处理 | 返回值 |
+|---|---|---|
+| `ssp.yg84.com/ssp/ad/list` | 清空素材列表 | `{"code":0,"data":[]}` —— SDK 视为「无填充」，安静跳过开屏，**不会转圈** |
+| `adx.yg84.com/sdk/ad/get` | 清空投放任务 | `tasks: []` / `tasksTimeouts: []` |
+| `adx.yg84.com/sdk/ad/setting` | 清空广告网络 | `data: []`（实测 data 是数组，不是对象） |
+| `adx.yg84.com/sdk/ad/init` | 清广告缓存 | `data.caches: []` |
+| `ctrace.yg84.com` | 整域 REJECT | 纯上报，一次冷启动 61 次，无业务价值 |
+| `m.magicacid.cn` | 整域 REJECT | 开屏曝光确认像素（请求里 `bm=` 与 SDK 的 `boot_mark` 一一对应） |
+
+> 为什么素材接口要「返回空列表」而不是直接 REJECT 整域：REJECT 会让 SDK 拿到连接错误、走超时重试，开屏可能反而变成**黑屏等待**；返回 `{"code":0,"data":[]}` 是 SDK 的「正常无广告」路径，立即收工。
+
+---
+
+## ★ 关键补充二：HTTPDNS —— 为什么域名规则时灵时不灵
+
+抓包里除了域名请求，还有这些：
+
+```
+http://124.70.194.16/ip46A?domain=api.chelaile.net.cn      ← HTTPDNS 解析
+http://[2407:c080:802:9fe:...]:80/ip46A?domain=...         ← HTTPDNS（IPv6）
+http://124.71.153.172/bus-side/appToggle/getStatus?...
+```
+
+车来了启动配置里带着 `useHttpDns:1` 和 `appBackupDomains:["cdn.api.chelaileapp.cn","cdn.api.chelaile.net.cn","124.70.194.16"]`，会**绕开系统 DNS 直接用 IP 请求**。后果是：Loon 的域名规则（`DOMAIN, xxx`）匹配不上，因为请求里根本没有域名。
+
+本插件的 `block_httpdns` 开关会删掉这几个字段，逼 App 回退到系统 DNS（也就是 Loon 的 DNS）。脚本的 URL 匹配用的是 `[^/]+` 通配主机名，所以**对 IP 直连同样有效**。
+
+---
+
 ## 二、安装
 
 Loon → 配置 → 插件 → 右上角 `+` → 添加订阅，填入：
@@ -66,8 +113,9 @@ https://raw.githubusercontent.com/onshine/ScriptHubs/main/chelaile/CheLaiLe_Ads.
 
 | 开关 | 默认 | 作用 |
 |---|---|---|
-| `remove_splash` | ✅ | 清洗启动配置，删掉开屏 / 插屏 / 预加载广告的开关字段。**去开屏广告的关键项** |
-| `remove_home_grid` | ✅ | 首页金刚位、「我的」页面里的推广位（保留地铁、站点地图等功能入口） |
+| `remove_splash` | ✅ | 清洗启动配置，删掉开屏 / 插屏 / 预加载广告的开关字段。让 App 不下发广告决策 |
+| `remove_ad_sdk` | ✅ | ★ **掐断 yg84 广告 SDK**：`adx.yg84.com` 调度层 + `ssp.yg84.com` 素材下发。**开屏广告的素材就是 ssp 下发的，这项是去开屏的关键** |
+| `remove_home_grid` | ✅ | 首页金刚位、「我的」页面里的推广位（保留地铁、站点地图、签到等功能入口） |
 | `remove_feed` | ✅ | 详情页信息流文章推荐、城市列表推广图，并清空广告 SDK 投放任务 |
 | `remove_notice` | ✅ | 公告、活动控制、LED 天气条等弹层 |
 | `block_httpdns` | ✅ | 删掉 `useHttpDns` / `appBackupDomains` / `blacklistDomains`，防止 App 走 HTTPDNS 绕过分流 |
@@ -118,8 +166,8 @@ JSON 解析失败、结构不符合预期、字段不存在 —— 全部 `$done
 
 | 现象 | 处理 |
 |---|---|
-| 开屏广告还在 | ① 确认 `remove_splash` 打开 ② 杀 App 重开 ③ 卸载重装 ④ 开 `debug` 看日志里有没有命中 `appToggle/getStatus` |
-| 首页金刚位还有推广 | 开 `debug`，看有没有命中 `flowPos/home`；没有就是新接口，把 URL 贴给我 |
+| 开屏广告还在 | ① 确认 `remove_splash` **和** `remove_ad_sdk` 都打开 ② 杀 App 重开 ③ 卸载重装（老素材有本地缓存） ④ 开 `debug`，日志里应能看到 `ssp 素材列表：已清空` |
+| 应用内广告还在 | 开 `debug` 看命中了哪些接口；没有命中就是新接口，把抓包 URL 贴出来 |
 | 完全没反应 | 检查 MitM 开关是否打开、证书是否被信任、插件是否启用 |
 | 页面空白 / 转圈 | **立刻停用插件**并反馈 —— 这是响应被写坏的信号（本脚本理论上不会，但要有这个止损动作） |
 | 想确认命中情况 | Loon → 日志，筛选 `车来了` |
@@ -127,6 +175,12 @@ JSON 解析失败、结构不符合预期、字段不存在 —— 全部 `$done
 ---
 
 ## 七、版本记录
+
+- **R1.0.1**（2026-10-10）**修「应用内干净了、开屏广告还在」**。据实测 HAR 补上 yg84 广告 SDK 的完整链路：
+  1. **补上 `ssp.yg84.com/ssp/ad/list`** —— 开屏广告素材的真正下发接口（此前只拦 `adx` 调度层，拦不住）；
+  2. 修正 `sdk/ad/setting` 清空方式（`data` 实测是数组，原来写成 `{}` 结构不对）；
+  3. 新增 `ssp/tracking` 曝光埋点处理，`ctrace.yg84.com` + `m.magicacid.cn` 整域 REJECT；
+  4. 新增 `remove_ad_sdk` 独立开关。
 
 - **R1.0.0**（2026-10-10）首版。基于 2026-10 仍有效的接口调研（可莉 Kelee 2026-10-02 版 + chikacya 2026-10-03 版），在其基础上做了三点改进：
   1. 外壳**动态保留**（不写死 `##`/`**`），兼容两种结尾标记；

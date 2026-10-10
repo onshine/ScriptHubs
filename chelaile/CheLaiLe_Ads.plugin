@@ -8,6 +8,7 @@
 
 [Argument]
 remove_splash = switch,true,tag=去开屏/插屏广告,desc=清洗启动配置里的开屏、插屏、预加载广告开关。这是去开屏广告的关键项，建议保持开启
+remove_ad_sdk = switch,true,tag=掐断广告SDK(yg84),desc=清空 yg84 广告 SDK 的调度任务与素材列表（adx.yg84.com 调度层 + ssp.yg84.com 素材下发）。★ 开屏广告的素材就是 ssp 下发的，这一项是去开屏的关键
 remove_home_grid = switch,true,tag=去首页金刚位推广,desc=移除首页金刚位与「我的」页面里的推广位，保留地铁、站点地图等功能入口
 remove_feed = switch,true,tag=去信息流/文章推荐,desc=移除详情页信息流文章推荐、城市列表推广图，并清空广告 SDK 的投放任务
 remove_notice = switch,true,tag=去公告/活动弹窗,desc=移除公告、活动控制、LED 天气条等非必要弹层
@@ -19,6 +20,10 @@ debug = switch,false,tag=调试日志,desc=在 Loon 运行日志里输出每个�
 DOMAIN, ad.chelaile.net.cn, REJECT
 DOMAIN, atrace.chelaile.net.cn, REJECT
 DOMAIN, logs.chelaile.net.cn, REJECT
+# yg84 广告 SDK 的埋点域名：实测一次冷启动打 61 次，纯上报无业务价值
+DOMAIN, ctrace.yg84.com, REJECT
+# 开屏广告的曝光确认像素（请求里 bm= 与 SDK 的 boot_mark 一一对应）
+DOMAIN, m.magicacid.cn, REJECT
 
 [Rewrite]
 # —— 广告素材 / 广告位接口（老接口，新版 App 已弱化但仍可能被调用）——
@@ -33,7 +38,7 @@ DOMAIN, logs.chelaile.net.cn, REJECT
 ^https?:\/\/image3\.chelaile\.net\.cn\/hw6u6LYY\.png reject-img
 
 [Script]
-http-response ^https?:\/\/[^\/]+\/(?:api\/)?(?:bus-side\/appToggle\/getStatus|goocity\/flowPos\/home|goocity\/flowPos\/listByPos|goocity\/city!|goocity\/config\/notices|encourage\/activity\/control|operative_position\/infoflow|led-weather\/[^\/]*\/condition_brief)|^https?:\/\/adx\.yg84\.com\/sdk\/ad\/ script-path=https://raw.githubusercontent.com/onshine/ScriptHubs/main/chelaile/chelaile-ads.js, requires-body=true, timeout=30, argument=[{"remove_splash":"{remove_splash}","remove_home_grid":"{remove_home_grid}","remove_feed":"{remove_feed}","remove_notice":"{remove_notice}","block_httpdns":"{block_httpdns}","debug":"{debug}"}], tag=车来了去广告
+http-response ^https?:\/\/[^\/]+\/(?:api\/)?(?:bus-side\/appToggle\/getStatus|goocity\/flowPos\/home|goocity\/flowPos\/listByPos|goocity\/city!|goocity\/config\/notices|encourage\/activity\/control|operative_position\/infoflow|led-weather\/[^\/]*\/condition_brief)|^https?:\/\/adx\.yg84\.com\/sdk\/ad\/|^https?:\/\/ssp\.yg84\.com\/ssp\/(?:ad\/list|tracking\/) script-path=https://raw.githubusercontent.com/onshine/ScriptHubs/main/chelaile/chelaile-ads.js, requires-body=true, timeout=30, argument=[{"remove_splash":"{remove_splash}","remove_ad_sdk":"{remove_ad_sdk}","remove_home_grid":"{remove_home_grid}","remove_feed":"{remove_feed}","remove_notice":"{remove_notice}","block_httpdns":"{block_httpdns}","debug":"{debug}"}], tag=车来了去广告
 
 [MitM]
-hostname = %APPEND% api.chelaile.net.cn, web.chelaile.net.cn, cdn.web.chelaile.net.cn, cdn.api.chelaile.net.cn, image3.chelaile.net.cn, pic1.chelaile.net.cn, adx.yg84.com, 124.70.194.16, 124.71.153.172
+hostname = %APPEND% api.chelaile.net.cn, web.chelaile.net.cn, cdn.web.chelaile.net.cn, cdn.api.chelaile.net.cn, image3.chelaile.net.cn, pic1.chelaile.net.cn, adx.yg84.com, ssp.yg84.com, 124.70.194.16, 124.71.153.172
