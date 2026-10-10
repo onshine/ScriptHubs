@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ==============================================================================
-# workbuddy2api 上游镜像迁移脚本  wb2api-migrate.sh  R1.0.0
+# workbuddy2api 上游镜像迁移脚本  wb2api-migrate.sh  R1.0.1
 #
 # 背景：上游 Sliverkiss/workbuddy2api 已删库，GHCR 镜像同步失效
 #       （ghcr.io/sliverkiss/workbuddy2api → 403 DENIED）。
@@ -19,13 +19,14 @@
 # ==============================================================================
 set -uo pipefail
 
-SCRIPT_VERSION="R1.0.0"
+SCRIPT_VERSION="R1.0.1"
 BK_DIR=""                          # do_backup 经此回传备份路径
 
 DIR="${WB2API_DIR:-/opt/workbuddy/workbuddy2api}"
 OLD_IMAGE="${WB2API_OLD_IMAGE:-ghcr.io/sliverkiss/workbuddy2api:latest}"
 NEW_IMAGE="${WB2API_NEW_IMAGE:-ghcr.io/hanawabanana/workbuddy2api:latest}"
 CTR="${WB2API_CONTAINER:-workbuddy2api}"
+PANEL_CTR="${WB_MANAGER_CONTAINER:-workbuddy-manager}"
 PORT="${WB2API_PORT:-17863}"
 COMPOSE="$DIR/docker-compose.yml"
 BK_ROOT="${WB2API_BACKUP_DIR:-/root}"
@@ -141,6 +142,22 @@ do_precheck() {
     ok "监听仅回环（$PORT）"
   fi
 
+  # 共享网络：bridge 模式下 recreate 会丢掉运行时加的网卡 —— 提前提示
+  local base
+  base="$(docker exec "$PANEL_CTR" printenv WB2API_BASE 2>/dev/null || true)"
+  case "$base" in
+    ""|*localhost*|*127.0.0.1*|*host.docker.internal*) : ;;
+    *)
+      if ! grep -qE '^[[:space:]]*networks:' "$COMPOSE" 2>/dev/null; then
+        warn "网关 compose 未声明 networks 段，而面板用容器名访问它（$base）"
+        inf "  → recreate 后会出现「上游连接：不可用」"
+        inf "    本脚本自检会自动补回网卡，但建议写进 compose 永久修复（见 README 5.11）"
+      else
+        ok "网关 compose 已声明 networks 段"
+      fi
+      ;;
+  esac
+
   printf '\n'
   if [ "$rc" -eq 0 ]; then printf '%s  ✅ 体检通过，可以迁移%s\n\n' "$G" "$N"
   else printf '%s  ⚠️  体检有 FAIL 项，建议先解决%s\n\n' "$Y" "$N"; fi
@@ -173,6 +190,52 @@ do_backup() {
 
 # ------------------------------ 自检 ------------------------------------------
 # 全部通过返回 0；$1 = 期望账号数
+# ------------------------------ 面板 → 网关连通性 ------------------------------
+# bridge 模式下，面板靠自定义网络用**容器名**访问网关（WB2API_BASE=http://workbuddy2api:PORT）。
+# 若那张网卡是当初用运行时 `docker network connect` 加上的，则**任何 recreate 都会丢掉它**
+# —— 表现为面板「上游连接：不可用」，而网关自己一切正常（healthz 200、账号池健康）。
+# 本脚本负责发现并自动补回。
+# 返回：0=通 / 1=不通（非网络原因）/ 2=不通且疑似共享网络丢失（可自动修复）
+panel_link_check() {
+  docker inspect "$PANEL_CTR" >/dev/null 2>&1 || { inf "无面板容器，跳过上游连通性检查"; return 0; }
+
+  local base
+  base="$(docker exec "$PANEL_CTR" printenv WB2API_BASE 2>/dev/null || true)"
+  [ -n "$base" ] || { warn "面板未设置 WB2API_BASE，跳过连通性检查"; return 0; }
+
+  local code
+  code="$(docker exec "$PANEL_CTR" sh -c \
+    "curl -s -o /dev/null -w '%{http_code}' --max-time 6 '${base}/healthz'" 2>/dev/null || true)"
+
+  if [ "$code" = "200" ]; then ok "面板 → 网关连通（$base）"; return 0; fi
+
+  err "面板 → 网关不通（$base → HTTP ${code:-000}）"
+  case "$base" in
+    *localhost*|*127.0.0.1*|*host.docker.internal*) return 1 ;;   # 走宿主，与共享网络无关
+  esac
+  return 2
+}
+
+repair_panel_link() {
+  local panel_nets gw_nets net
+  panel_nets="$(docker inspect -f '{{range $k,$v := .NetworkSettings.Networks}}{{$k}} {{end}}' "$PANEL_CTR" 2>/dev/null || true)"
+  gw_nets="$(docker inspect -f '{{range $k,$v := .NetworkSettings.Networks}}{{$k}} {{end}}' "$CTR" 2>/dev/null || true)"
+  local fixed=0
+  for net in $panel_nets; do
+    case "$net" in *_default) continue ;; esac
+    case " $gw_nets " in *" $net "*) continue ;; esac
+    inf "把网关接回共享网络 $net ..."
+    if docker network connect "$net" "$CTR" --alias "$CTR" 2>/dev/null; then
+      ok "已接入 $net"; fixed=1
+    else
+      warn "接入 $net 失败"
+    fi
+  done
+  [ "$fixed" -eq 1 ] && warn "⚠️ 这只是运行时的权宜之计 —— 要永久生效，请把共享网络写进网关 compose："
+  [ "$fixed" -eq 1 ] && inf "   服务下加 networks: [default, $net]；文件末尾加 networks: {$net: {external: true}}"
+  return 0
+}
+
 post_check() {
   local want="$1" st h fail=0
 
@@ -207,6 +270,21 @@ post_check() {
     ok "监听仍仅回环"
   else
     warn "看不到 $PORT 监听"
+  fi
+
+  # 面板 → 网关（bridge 模式下 recreate 会丢共享网络，见 panel_link_check 注释）
+  local plrc=0
+  panel_link_check || plrc=$?
+  if [ "$plrc" -eq 2 ]; then
+    warn "疑似 recreate 后共享网络丢失 —— 自动补回"
+    repair_panel_link
+    sleep 3
+    local plrc2=0
+    panel_link_check >/dev/null 2>&1 || plrc2=$?
+    if [ "$plrc2" -eq 0 ]; then ok "补回后：面板 → 网关已连通"
+    else err "补回后仍不通 —— 请检查网关 compose 的 networks 段"; fail=1; fi
+  elif [ "$plrc" -ne 0 ]; then
+    fail=1
   fi
 
   return $fail
