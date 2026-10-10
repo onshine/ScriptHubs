@@ -1,0 +1,231 @@
+# 车来了去广告（Loon）
+
+去掉「车来了」iOS App 的**开屏广告**与**应用内广告**。适用于 Loon（脚本 / 复写 / MitM 均为新版语法，建议 Loon ≥ 3.5.1）。
+
+- 插件：`CheLaiLe_Ads.plugin`
+- 脚本：`chelaile-ads.js`
+- 版本：**R1.0.2**
+
+---
+
+## 一、为什么你之前装的规则「突然不好使了」
+
+车来了 App 在 2025 年底～2026 年做了一次接口大改版，**老的去广告规则基本全废**，原因是双重的：
+
+**1. 接口换了。** 老规则（奶思 wool_scripts / 墨鱼 ddgksf2013 / 各处抄来抄去的那份）打的是这些地址：
+
+```
+pic1.chelaile.net.cn/adv/            ← 老开屏图
+api.chelaile.net.cn/adpub/           ← 老广告位
+api.chelaile.net.cn/goocity/advert/  ← 老广告接口
+cdn.*.chelaileapp.cn/(api/)adpub     ← 老 CDN 广告
+```
+
+而现在 App 实际在用的是：
+
+```
+api.chelaile.net.cn/bus-side/appToggle/getStatus   ← 启动配置（开屏/插屏全部开关在这）
+api.chelaile.net.cn/goocity/flowPos/home           ← 首页金刚位（含推广位）
+api.chelaile.net.cn/goocity/flowPos/listByPos      ← 「我的」页面推广位
+web.chelaile.net.cn/api/operative_position/infoflow/getInfo  ← 详情页信息流
+cdn.web.chelaile.net.cn/info-flow/index.html       ← 信息流落地页
+image3.chelaile.net.cn/hw6u6LYY.png                ← 首页固定广告位图
+api.chelaile.net.cn/goocity/config/notices         ← 公告弹窗
+api.chelaile.net.cn/encourage/activity/control     ← 活动弹窗
+api.chelaile.net.cn/led-weather/v1/condition_brief ← LED 天气条
+adx.yg84.com/sdk/ad/{get,setting,init}             ← 广告 SDK（投放任务下发）
+```
+
+老规则的路径**一个都不在上面**，所以它其实早就「空转」了 —— 规则还在跑，只是再也匹配不到东西。
+
+**2. 思路也过时了。** 老规则是「等广告素材请求出来再拦」。现在开屏广告是**先由启动配置接口下发开关和素材 URL**，App 再照着去拉素材。只要拦不到配置这一步，广告会照常显示；反过来，**把配置里的广告字段删掉，App 压根不会去拉开屏素材**，连加载都不发生。这才是现在唯一稳的做法。
+
+> 本插件的核心就是第 2 条：`appToggle/getStatus` 配置清洗。
+
+---
+
+## ★ 关键补充一：开屏广告的另一条链路 —— yg84 广告 SDK
+
+我最初的版本只拦到了 `adx.yg84.com`，结果**应用内广告全没了、开屏广告还在**。抓包（2026-10-10 实测 HAR）之后才看清：车来了把开屏广告外包给了 **yg84 广告 SDK**（一个聚合了穿山甲/优量汇/百度的第三方广告平台），一次冷启动的完整链路是：
+
+```
+1) adx.yg84.com/sdk/ad/init      79KB  SDK 初始化 + 广告缓存
+2) adx.yg84.com/sdk/ad/setting   ────  「已启用的广告网络列表」→ gdt / csj / bd / gm
+3) adx.yg84.com/sdk/ad/appList   ────  目标 App 的 deep-link 映射表（定向用）
+4) adx.yg84.com/sdk/ad/get       54KB  SDK 调度层下发「投放任务」
+5) ssp.yg84.com/ssp/ad/list      54KB  ★ 真正下发广告素材 ← 开屏广告本体在这
+6) ctrace.yg84.com/thirdSimple… ×61    曝光/回调埋点
+7) ssp.yg84.com/ssp/tracking/*         曝光确认
+```
+
+**关键点：`adx` 只是调度层，素材由 `ssp` 下发。** 只清 `adx` 的 tasks，SDK 仍可能走 `ssp` 取到广告 —— 这就是「应用内干净了、开屏还在」的原因。
+
+R1.0.1 的处理：
+
+| 接口 | 处理 | 返回值 |
+|---|---|---|
+| `ssp.yg84.com/ssp/ad/list` | 清空素材列表 | `{"code":0,"data":[]}` —— SDK 视为「无填充」，安静跳过开屏，**不会转圈** |
+| `adx.yg84.com/sdk/ad/get` | 清空投放任务 | `tasks: []` / `tasksTimeouts: []` |
+| `adx.yg84.com/sdk/ad/setting` | 清空广告网络 | `data: []`（实测 data 是数组，不是对象） |
+| `adx.yg84.com/sdk/ad/init` | 清广告缓存 | `data.caches: []` |
+| `ctrace.yg84.com` | 整域 REJECT | 纯上报，一次冷启动 61 次，无业务价值 |
+| `m.magicacid.cn` | 整域 REJECT | 开屏曝光确认像素（请求里 `bm=` 与 SDK 的 `boot_mark` 一一对应） |
+
+> 为什么素材接口要「返回空列表」而不是直接 REJECT 整域：REJECT 会让 SDK 拿到连接错误、走超时重试，开屏可能反而变成**黑屏等待**；返回 `{"code":0,"data":[]}` 是 SDK 的「正常无广告」路径，立即收工。
+
+---
+
+## ★ 关键补充二：Loon 里「规则」会立刻生效，但「脚本」会被缓存
+
+这是排查过程中最坑的一点，也是 R1.0.2 改用 `[Rule]` 的原因，值得单独记一笔。
+
+**现象**：R1.0.1 推上去后，开屏广告照旧。但抓包对比两次 HAR 发现：
+
+| 域名 | 加规则前 | 加规则后 |
+|---|---|---|
+| `ctrace.yg84.com`（`[Rule]` REJECT） | 61 次 | **0 次** ✅ |
+| `m.magicacid.cn`（`[Rule]` REJECT） | 1 次 | **0 次** ✅ |
+| `ssp.yg84.com`（只靠 `[Script]` 处理） | 8 次 | 27 次 ❌ 还在下发广告 |
+
+**规则生效了、脚本没生效** —— 因为 Loon 把远程脚本**缓存在本地**，插件更新不会重新拉 `script-path`。URL 没变，Loon 就一直用旧的那份（还是 R1.0.0，里面根本没有 ssp 处理）。
+
+**判据**：抓包里 `ssp.yg84.com/ssp/tracking/show` 被调用了 → 说明 SDK **确实拿到并展示了广告** → 脚本没有清空 `ssp/ad/list`。
+
+**教训**：
+
+1. **能用 `[Rule]` / `[Rewrite]` 解决的，不要只靠 `[Script]`** —— 前两者是插件的一部分，更新插件即生效；脚本是独立缓存的。
+2. 改了远端脚本，必须在 Loon 里**删掉插件重新添加**（「更新插件」不一定重拉脚本）。
+3. 判断脚本有没有生效，**不能看 Loon 抓包** —— 抓包记录的是**脚本处理前的原始响应**。本插件里那些 `"message":"ok"` 的 35 字节空响应就是服务端自己返回的「无填充」，不是脚本写的（脚本写的是 `"message":"no ad"`）。要看脚本效果只能看**运行日志**（开 `debug` 后会有 `[车来了 R1.0.2] …` 开头的行）。
+
+所以 R1.0.2 把开屏广告的处置从脚本挪到了规则：
+
+```
+DOMAIN, adx.yg84.com, REJECT
+DOMAIN, ssp.yg84.com, REJECT
+```
+
+脚本里的 yg84 分支保留着，作为「温和模式」备用（去掉规则后，脚本会返回 `{"code":0,"data":[]}` 让 SDK 安静收工，而不是拿连接错误去超时重试）。
+
+---
+
+## ★ 关键补充三：HTTPDNS —— 为什么域名规则时灵时不灵
+
+抓包里除了域名请求，还有这些：
+
+```
+http://124.70.194.16/ip46A?domain=api.chelaile.net.cn      ← HTTPDNS 解析
+http://[2407:c080:802:9fe:...]:80/ip46A?domain=...         ← HTTPDNS（IPv6）
+http://124.71.153.172/bus-side/appToggle/getStatus?...
+```
+
+车来了启动配置里带着 `useHttpDns:1` 和 `appBackupDomains:["cdn.api.chelaileapp.cn","cdn.api.chelaile.net.cn","124.70.194.16"]`，会**绕开系统 DNS 直接用 IP 请求**。后果是：Loon 的域名规则（`DOMAIN, xxx`）匹配不上，因为请求里根本没有域名。
+
+本插件的 `block_httpdns` 开关会删掉这几个字段，逼 App 回退到系统 DNS（也就是 Loon 的 DNS）。脚本的 URL 匹配用的是 `[^/]+` 通配主机名，所以**对 IP 直连同样有效**。
+
+---
+
+## 二、安装
+
+Loon → 配置 → 插件 → 右上角 `+` → 添加订阅，填入：
+
+```
+https://raw.githubusercontent.com/onshine/ScriptHubs/main/chelaile/CheLaiLe_Ads.plugin
+```
+
+装好后：
+
+1. **打开 MitM**（插件会自动把所需域名附加进 MitM 列表，用的是 `%APPEND%`，不会覆盖你自己的列表）。
+2. 确认 MitM 证书已安装且在「关于本机 → 证书信任设置」里被信任。
+3. 进插件设置页，7 个开关按需勾选（默认全开）。
+4. **★ 如果你装过旧版，请先删掉插件再重新添加** —— Loon 会缓存远程脚本，「更新插件」不一定会重新拉取。
+5. **杀掉车来了 App 重开**（老配置与广告素材缓存在内存/本地，不重启可能还是旧行为）。
+6. 如果开屏广告还在，去 **设置 → 通用 → iPhone 储存空间 → 车来了 → 卸载 App**（保留数据的那种「卸载」，不是「删除」）后重装 —— SDK 每个广告位可缓存 3 条素材，本地那份清不掉就会继续放。
+
+---
+
+## 三、开关说明
+
+| 开关 | 默认 | 作用 |
+|---|---|---|
+| `remove_splash` | ✅ | 清洗启动配置，删掉开屏 / 插屏 / 预加载广告的开关字段。让 App 不下发广告决策 |
+| `remove_ad_sdk` | ✅ | ★ **掐断 yg84 广告 SDK**：`adx.yg84.com` 调度层 + `ssp.yg84.com` 素材下发。**开屏广告的素材就是 ssp 下发的，这项是去开屏的关键** |
+| `remove_home_grid` | ✅ | 首页金刚位、「我的」页面里的推广位（保留地铁、站点地图、签到等功能入口） |
+| `remove_feed` | ✅ | 详情页信息流文章推荐、城市列表推广图，并清空广告 SDK 投放任务 |
+| `remove_notice` | ✅ | 公告、活动控制、LED 天气条等弹层 |
+| `block_httpdns` | ✅ | 删掉 `useHttpDns` / `appBackupDomains` / `blacklistDomains`，防止 App 走 HTTPDNS 绕过分流 |
+| `debug` | ❌ | 在 Loon 运行日志里输出每个接口的处理结果，排查用 |
+
+---
+
+## 四、实现要点（改脚本前必读）
+
+### 1. 响应体的 `**YGKJ...YGKJ##` 外壳绝不能写死
+
+车来了的接口响应都被包成：
+
+```
+**YGKJ{"jsonr":{"status":"00","data":{...}}}YGKJ##
+```
+
+历史上有 `YGKJ**`、`YGKJ##` 两种结尾标记都出现过。很多去广告脚本直接 `mock` 一段写死的 JSON 字符串，**一旦 App 换了结尾标记就会解析失败**，表现为首页空白 / 一直转圈。
+
+本脚本的做法是：**用正则把外壳切出来，只替换中间那段 JSON，外壳原样接回去**（`splitWrap` / `joinWrap`）。无论 App 用 `##` 还是 `**`，都不会写坏数据。
+
+### 2. 只删字段，不写死内容
+
+社区部分规则会把首页金刚位 `mock` 成一段固定的两三项 JSON。App 改版加了新功能入口，这段 JSON 就错位了。
+
+本脚本改为**按「是不是推广」判断并剔除**：指向外部 App（有 `appId`/`appPath`）或站外链接的判为推广位，其余保留。App 加新功能入口也能自动带上。
+
+### 3. 任何异常一律放行原响应
+
+JSON 解析失败、结构不符合预期、字段不存在 —— 全部 `$done({})`，让原始响应原样通过。**宁可这个广告拦不掉，也绝不把 App 的响应写坏。**
+
+### 4. 老接口仍然保留拦截
+
+`adpub` / `goocity/advert` / `pic1/adv/` 这些老路径在 `[Rewrite]` 里保留着，防止某些版本或某些机型回退到老接口。
+
+---
+
+## 五、可选但强烈建议：装一个「广告平台拦截器」
+
+车来了会通过 **HTTPDNS** 解析广告域名，从而绕开 Loon 的 DNS 与规则匹配，导致去广告时灵时不灵。
+
+- 本插件已经会删掉配置里的 `useHttpDns` 字段（`block_httpdns` 开关）。
+- 但如果你的其他 App 也需要去广告，建议再装一个专门的 HTTPDNS 拦截插件（社区常叫「广告平台拦截器」，可莉/VirgilClyne 维护的那份），把所有去广告插件都变成它的下游。
+
+---
+
+## 六、排查
+
+| 现象 | 处理 |
+|---|---|
+| 开屏广告还在 | ① 确认插件里的 `DOMAIN, adx.yg84.com / ssp.yg84.com, REJECT` 在（规则不依赖脚本，最可靠）② 删掉插件重新添加（清脚本缓存）③ 卸载重装 App（SDK 每个广告位缓存 3 条素材）④ 开 `debug` 看运行日志有没有 `[车来了 R1.0.2]` 开头的行 |
+| 应用内广告还在 | 开 `debug` 看命中了哪些接口；没有命中就是新接口，把抓包 URL 贴出来 |
+| 完全没反应 | 检查 MitM 开关是否打开、证书是否被信任、插件是否启用 |
+| 页面空白 / 转圈 | **立刻停用插件**并反馈 —— 这是响应被写坏的信号（本脚本理论上不会，但要有这个止损动作） |
+| 想确认命中情况 | Loon → 日志，筛选 `车来了` |
+
+---
+
+## 七、版本记录
+
+- **R1.0.2**（2026-10-10）**修「R1.0.1 装完开屏广告照旧」**。根因是 Loon **缓存了旧版脚本**：插件里的 `[Rule]` 立即生效（`ctrace.yg84.com` 实测 61 次 → 0 次），但 `[Script]` 仍跑的是 R1.0.0（没有 ssp 处理），所以开屏素材照样下发。
+  1. 开屏广告改用 **`[Rule]` 整域 REJECT**（`adx.yg84.com` + `ssp.yg84.com`），不再依赖脚本，更新插件即生效；
+  2. 脚本保留 yg84 的温和处理分支作为备用；
+  3. README 新增「规则立刻生效 / 脚本会被缓存」一节。
+
+- **R1.0.1**（2026-10-10）**修「应用内干净了、开屏广告还在」**。据实测 HAR 补上 yg84 广告 SDK 的完整链路：
+  1. **补上 `ssp.yg84.com/ssp/ad/list`** —— 开屏广告素材的真正下发接口（此前只拦 `adx` 调度层，拦不住）；
+  2. 修正 `sdk/ad/setting` 清空方式（`data` 实测是数组，原来写成 `{}` 结构不对）；
+  3. 新增 `ssp/tracking` 曝光埋点处理，`ctrace.yg84.com` + `m.magicacid.cn` 整域 REJECT；
+  4. 新增 `remove_ad_sdk` 独立开关。
+
+- **R1.0.0**（2026-10-10）首版。基于 2026-10 仍有效的接口调研（可莉 Kelee 2026-10-02 版 + chikacya 2026-10-03 版），在其基础上做了三点改进：
+  1. 外壳**动态保留**（不写死 `##`/`**`），兼容两种结尾标记；
+  2. 首页金刚位改为**按推广特征动态剔除**，不再写死固定 JSON；
+  3. 补齐 chikacya 版独有的 **`adx.yg84.com` 广告 SDK** 处理，并新增 `block_httpdns` 防绕过开关。
+
+---
+
+仅供学习交流。规则基于公开社区资料与逆向观察整理，接口随时可能变更；如失效请按「排查」一节定位后反馈。
