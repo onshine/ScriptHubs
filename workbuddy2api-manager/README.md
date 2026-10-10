@@ -10,6 +10,9 @@
 - `wb2api-migrate.sh` — **上游镜像迁移**：原 `sliverkiss/workbuddy2api` 已删库（GHCR 403），
   一键切到延续仓库 `hanawabanana/workbuddy2api`，含备份校验、账号数比对与失败自动回滚；
   并**自检面板 → 网关连通性**（bridge 模式下重建会丢共享网络，见 5.11）
+- `wb2api-update.sh` — **上游更新**（镜像式部署专用）：`pull` + `force-recreate`，
+  含备份校验、账号数比对、面板→网关连通性自检与回滚提示。
+  面板的「一键更新 → 上游」不支持镜像式部署，用它代替（见 5.12）
 - `caddy.example.conf` — 反向代理最小示例（仅反代，不含任何个人配置）
 
 > ⚠️ **合规提醒**：workbuddy2api 是第三方账号的非官方 OpenAI 兼容网关，
@@ -588,6 +591,84 @@ docker inspect workbuddy2api --format '{{range $k,$v := .NetworkSettings.Network
 > 注意区分两种情况：`WB2API_BASE` 指向**容器名**时才可能是共享网络问题；
 > 指向 `127.0.0.1` / `host.docker.internal` 时走宿主，与共享网络无关。
 
+### 5.12 面板「一键更新 → 上游」跳过：「不是 git 仓库」
+
+**症状**：点面板的「仅上游」或「全部更新」，日志显示：
+
+```
+== 更新上游 workbuddy2api ==
+/opt/workbuddy2api 不是 git 仓库，跳过上游更新
+更新完成
+```
+
+**这不是故障，是「部署形态」不匹配。**
+
+#### 面板只支持两种上游形态
+
+来自 `deploy/update.py`：
+
+```python
+def update_upstream(rep):
+    if not (UPSTREAM_DIR / '.git').is_dir():
+        rep.log(f'{UPSTREAM_DIR} 是随包分发的上游（不是 git 仓库）：'
+                '代码随管理端一起更新，本次不单独更新上游')
+        return
+```
+
+| 面板支持 | 说明 |
+|---|---|
+| ① 上游目录是 **git 仓库** | 它跑 `git fetch` / `git reset --hard`（还会单独保住你的 compose 定制） |
+| ② 上游**源码随面板 Release 分发** | 即用 `deploy/install.sh` 装的；源码在包内 `upstream/`，随面板更新一起同步，然后 `docker compose build` |
+
+面板官方文档里也写着（`deploy/README.md`）：
+
+> 已经在跑的部署：上游源码在你机器上、**镜像也是本地构建的**；面板的一键更新会沿用现有源码重建上游
+
+#### 而本套件生成的是第三种形态：**预构建镜像**
+
+```yaml
+image: ghcr.io/hanawabanana/workbuddy2api:latest    # 拉现成镜像，本地没有源码
+```
+
+既没有 `.git`，也没有可构建的源码 → 面板两条路都走不通，直接跳过。
+
+> 附带一处对不上：面板的端口收敛认的是 **7863**，本套件用 **17863**。
+> 它匹配不到会打一条 `未匹配到端口绑定行，请人工确认 compose 配置` 的 warn，
+> **不会改坏文件**（`enforce_local_bind` 只在匹配到才写）。
+
+#### 镜像式部署的正确更新方式
+
+就是 compose 的标准两行：
+
+```bash
+cd /opt/workbuddy/workbuddy2api
+docker compose pull && docker compose up -d --force-recreate
+```
+
+**本目录提供 `wb2api-update.sh` 把它封装好了**（含备份校验、账号数比对、
+面板→网关连通性自检、失败提示回滚）：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/onshine/ScriptHubs/main/workbuddy2api-manager/wb2api-update.sh -o /root/wb2api-update.sh
+chmod +x /root/wb2api-update.sh
+/root/wb2api-update.sh --check     # 只体检
+/root/wb2api-update.sh             # 更新
+```
+
+#### 面板哪些按钮仍然有用
+
+| 按钮 | 对镜像式部署 |
+|---|---|
+| **仅管理端** | ✅ 正常（面板自身更新，含签名校验） |
+| 仅上游 | ⚠️ 跳过（本节的说明） |
+| 全部更新 | 面板部分正常；上游部分会尝试把**包内源码**同步进你的目录 |
+
+> ⚠️ 「全部更新」会把面板 Release 里的上游源码（`Dockerfile` / `cmd/` / `internal/` 等）
+> 同步进 `/opt/workbuddy2api`。**它不会动 `config.json` / `auths/` / `data/`，也会保住你的
+> compose 定制**（见 `_sync_bundled_upstream` 的三条克制），但这些源码在你的 `image:` compose
+> 下是**用不到的**（不会被执行），只是目录里多了些文件。想要目录干净就别点「全部更新」，
+> 用 `wb2api-update.sh` 更新上游、用「仅管理端」更新面板。
+
 ---
 
 ## 六、安全基线
@@ -645,7 +726,7 @@ workbuddy2api-manager/
 
 | 版本 | 说明 |
 |---|---|
-| R1.0.3 | **修正 5.8 认知错误 + 修复 bridge 模式缺陷 + 应对上游删库**。① 原文称「官方作者建议不挂 docker.sock」，实际读上游仓库后确认**反了** —— 官方 compose 里该行默认启用，且注释明确论证「挂 socket 与原生 root 部署权限等价，不是新增风险」；新增 `open-docker-ctl.sh`（诊断 / 开启 / 关闭面板 docker 控制能力，幂等、带 compose 备份与 YAML 校验）；重写 5.8，区分 `permission denied`（补 group_add）与 `command not found`（缺镜像 CLI，补组无效）。② **修复 bridge 模式多个致命缺陷** —— a) `WB2API_BASE` 默认写成 `http://host.docker.internal:GW_PORT`，该值只对 `NET_MODE=host` 成立；bridge 模式下两个容器各在独立网络，`host.docker.internal` 解析到 docker0 网桥，而网关端口只绑宿主 `127.0.0.1`，**必然连不上**，界面显示「上游连接：不可用」。现改为自动创建自定义网络 `workbuddy-net`，两容器均接入，`WB2API_BASE` 用**容器名** `http://workbuddy2api:GW_PORT` 走 docker 内建 DNS（端口仍只绑回环，不暴露）。b) bridge 分支缺 `group_add` → 「一键更新」`permission denied`；现动态探测 `getent group docker` 的 GID 注入（**各机 GID 不同**：实测 firadio=995、Yuusei=989，写死必错）。c) 面板 healthcheck 探针误用宿主端口 17864，改为容器内端口 7864（与 5.7 网关同类 bug）。d) 部署后自检新增「面板 → 上游连通性」一项，直接打 `WB2API_BASE` 并给出分模式排错提示 —— 此前脚本**完全没有验证这一项**，导致部署「全绿」但界面不可用。e) `net-check.sh` 第 2 步原用 `127.0.0.1:GW_PORT` 探测（在面板容器里指向它自己，必误报），改为先读取真实 `WB2API_BASE`。f) README 5.7 修正端口表述：容器内监听是 `GW_CTR_PORT`/`WB2A_LISTEN`，`GW_PORT` 仅为宿主映射，两者不可混用。③ **`Sliverkiss/workbuddy2api` 仓库与 GHCR 镜像双双消失（GitHub 404 / GHCR 403）** —— 「一键更新 → 仅上游」必定失败；`workbuddy2api.sh` 生成的 compose 与 `docker pull` 改用延续仓库 `ghcr.io/hanawabanana/workbuddy2api:latest`（`is_our_compose()` 仍保留 sliverkiss 特征以兼容老部署）；新增 `wb2api-migrate.sh` 一键迁移（备份校验 + 账号数比对 + 失败自动回滚）与 README 5.10。④ **README 5.11 / 脚本 R1.0.1**：bridge 模式下 `docker network connect` 加的共享网卡**不随 compose recreate 保留**，重建网关后面板必现「上游连接：不可用」。迁移脚本改为：体检时检查 compose 是否声明 `networks` 段，自检时主动探测**面板 → 网关连通性**并在确认是共享网络丢失时**自动补回网卡**。 |
+| R1.0.3 | **修正 5.8 认知错误 + 修复 bridge 模式缺陷 + 应对上游删库**。① 原文称「官方作者建议不挂 docker.sock」，实际读上游仓库后确认**反了** —— 官方 compose 里该行默认启用，且注释明确论证「挂 socket 与原生 root 部署权限等价，不是新增风险」；新增 `open-docker-ctl.sh`（诊断 / 开启 / 关闭面板 docker 控制能力，幂等、带 compose 备份与 YAML 校验）；重写 5.8，区分 `permission denied`（补 group_add）与 `command not found`（缺镜像 CLI，补组无效）。② **修复 bridge 模式多个致命缺陷** —— a) `WB2API_BASE` 默认写成 `http://host.docker.internal:GW_PORT`，该值只对 `NET_MODE=host` 成立；bridge 模式下两个容器各在独立网络，`host.docker.internal` 解析到 docker0 网桥，而网关端口只绑宿主 `127.0.0.1`，**必然连不上**，界面显示「上游连接：不可用」。现改为自动创建自定义网络 `workbuddy-net`，两容器均接入，`WB2API_BASE` 用**容器名** `http://workbuddy2api:GW_PORT` 走 docker 内建 DNS（端口仍只绑回环，不暴露）。b) bridge 分支缺 `group_add` → 「一键更新」`permission denied`；现动态探测 `getent group docker` 的 GID 注入（**各机 GID 不同**：实测 firadio=995、Yuusei=989，写死必错）。c) 面板 healthcheck 探针误用宿主端口 17864，改为容器内端口 7864（与 5.7 网关同类 bug）。d) 部署后自检新增「面板 → 上游连通性」一项，直接打 `WB2API_BASE` 并给出分模式排错提示 —— 此前脚本**完全没有验证这一项**，导致部署「全绿」但界面不可用。e) `net-check.sh` 第 2 步原用 `127.0.0.1:GW_PORT` 探测（在面板容器里指向它自己，必误报），改为先读取真实 `WB2API_BASE`。f) README 5.7 修正端口表述：容器内监听是 `GW_CTR_PORT`/`WB2A_LISTEN`，`GW_PORT` 仅为宿主映射，两者不可混用。③ **`Sliverkiss/workbuddy2api` 仓库与 GHCR 镜像双双消失（GitHub 404 / GHCR 403）** —— 「一键更新 → 仅上游」必定失败；`workbuddy2api.sh` 生成的 compose 与 `docker pull` 改用延续仓库 `ghcr.io/hanawabanana/workbuddy2api:latest`（`is_our_compose()` 仍保留 sliverkiss 特征以兼容老部署）；新增 `wb2api-migrate.sh` 一键迁移（备份校验 + 账号数比对 + 失败自动回滚）与 README 5.10。④ **README 5.11 / 脚本 R1.0.1**：bridge 模式下 `docker network connect` 加的共享网卡**不随 compose recreate 保留**，重建网关后面板必现「上游连接：不可用」。迁移脚本改为：体检时检查 compose 是否声明 `networks` 段，自检时主动探测**面板 → 网关连通性**并在确认是共享网络丢失时**自动补回网卡**。。⑤ **新增 `wb2api-update.sh` 与 README 5.12**：面板的「一键更新 → 上游」只支持 ① git 仓库 ② 随包分发的源码（`install.sh` 装的，它 `docker compose build`）两种形态；本套件生成的是第三种「**预构建镜像**」，面板会直接跳过（`不是 git 仓库，跳过上游更新`）——不是故障而是形态不匹配。为镜像式部署补上专用更新脚本（pull + force-recreate，含备份/账号数比对/面板连通性自检/回滚提示）。 |
 | R1.0.2 | **修正网关容器永远 `unhealthy`**：官方镜像 healthcheck 写死探测 `127.0.0.1:7863/healthz`，而本脚本让网关监听 `GW_PORT`（默认 17863），两者不一致导致连续失败（服务实际正常）。生成 compose 时覆盖为实际端口（host/bridge 两个分支都已处理）。此问题会让**告警彻底失效**（永远红 → 真挂了也看不出）。新增 README 5.7/5.8/5.9：unhealthy 修复、面板「无法操作 docker」的权限诊断（`group_add` 与风险）、不依赖面板按钮的上游/面板更新命令与三个坑。 |
 | R1.0.1 | 主脚本 `deploy.sh` 更名为 `workbuddy2api.sh`（脚本内容与 R1.0.0 完全一致，仅自身引用文案随之更新）。原 `deploy.sh` 保留为**兼容外壳**，透传参数到新脚本，旧命令继续可用 —— 已部署的服务器无需任何操作。README 命令示例统一改为新名。 |
 | R1.0.0 | 首个版本。`deploy.sh` 支持部署/更新/停止/重启/状态/日志/重置密码；`NET_MODE=host` 应对 LXC 里 Docker bridge 出网不通；三重自检（端口链 / 登录接口 / 容器出网）；修正面板容器内固定 7864 但映射写成同号导致的 502；修正「每次重跑都打印一个无效的面板密码」；`reset-password` 用与面板一致的 PBKDF2-SHA256 重写哈希并递增会话版本。附 `net-check.sh` 与 `caddy.example.conf`。 |
