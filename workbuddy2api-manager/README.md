@@ -7,6 +7,8 @@
 - `deploy.sh` — ⚠️ **已更名**为 `workbuddy2api.sh`；此文件保留为兼容外壳，旧命令 `./deploy.sh xxx` 仍可用
 - `net-check.sh` — 容器网络与出网排查
 - `open-docker-ctl.sh` — 面板「一键更新」能力开关（诊断 / 开启 / 关闭），处理「套接字已挂载但容器无权限」这一中间态
+- `wb2api-migrate.sh` — **上游镜像迁移**：原 `sliverkiss/workbuddy2api` 已删库（GHCR 403），
+  一键切到延续仓库 `hanawabanana/workbuddy2api`，含备份校验、账号数比对与失败自动回滚
 - `caddy.example.conf` — 反向代理最小示例（仅反代，不含任何个人配置）
 
 > ⚠️ **合规提醒**：workbuddy2api 是第三方账号的非官方 OpenAI 兼容网关，
@@ -390,6 +392,99 @@ sleep 20 && docker ps | grep workbuddy
 ss -lntp | grep 17863     # 必须是 127.0.0.1:17863，若是 0.0.0.0 则已暴露公网
 ```
 
+### 5.10 ⚠️ 上游已删库 —— 必须迁移镜像
+
+**这是本套件目前最要紧的一件事。**
+
+`Sliverkiss/workbuddy2api`（原版，1.2k★）**仓库与镜像双双消失**：
+
+| 检查 | 结果 |
+|---|---|
+| `https://github.com/Sliverkiss/workbuddy2api` | **404**（用户还在，仓库没了） |
+| `ghcr.io/sliverkiss/workbuddy2api`（匿名拉取） | **403 DENIED** |
+| 对照：`ghcr.io/ithtelab/workbuddy-manager` | 200 ✅（说明是它没了，不是网络问题） |
+
+后果：**「一键更新 → 仅上游 / 全部更新」现在必定失败**（`docker compose pull` 报错）。
+容器还在跑，只是因为镜像缓存在本地。面板本身的更新不受影响。
+
+#### 血缘（已逐条实证）
+
+```
+Sliverkiss/workbuddy2api       原版，7月→9月持续演进
+   ├── ckldy/workbuddy2api     镜像拷贝，冻结在 2026-07-28（★11 / fork 390）
+   ├── HanawaBanana/workbuddy2api   ★72「延续仓库」（2026-09-24 建，持续更新）
+   └── linguo2625469/workbuddy2api-panel  ★2557 增强分支 + 自带 Web 面板
+```
+
+`ckldy` 的 README 里仍写着 `git clone .../Sliverkiss/workbuddy2api.git` —— 证明它是拷贝
+（连 README 一起抄了，所以还留着原地址）。
+
+#### 迁移目标：`HanawaBanana/workbuddy2api`
+
+仓库描述自述得很清楚：
+
+> WorkBuddy2API **延续仓库** —— 账号池转 OpenAI 兼容 API（**原 Sliverkiss/workbuddy2api 已删库**，MIT）
+
+- 镜像 `ghcr.io/hanawabanana/workbuddy2api:latest` 已实测**可匿名拉取**（有 CI 自动多架构构建）
+- README 明确兼容 `ithtelab/workbuddy-manager`（本套件用的面板）→ **换镜像不用换面板**
+
+#### 兼容性（已逐项验证，结论：零迁移成本）
+
+| 项 | 结论 |
+|---|---|
+| config.json 字段 | **只增不减**（你的 39 个字段 ⊂ 它的 74 个）。`Load()` 先 `Default()` 再 `Unmarshal`，缺失字段自动补默认值 |
+| auths 格式 | `{auth:{accessToken,refreshToken,expiresAt,domain,realm}, account:{uid,enterpriseId,nickname}}` —— 与你现有文件**逐字段吻合** |
+| `listen: "17863"`（无冒号） | 代码 `if !HasPrefix(":") && !Contains(":") → ":"+addr` 自动补全 |
+| 容器 ENTRYPOINT | `/app/wb2api -config /app/config.json`，与现有一致 |
+| 镜像内置 healthcheck 探 7863 | ⚠️ 与你容器内端口不符，**但本脚本生成的 compose 已覆盖为 17863**，compose 级优先 |
+
+#### 一键迁移
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/onshine/ScriptHubs/main/workbuddy2api-manager/wb2api-migrate.sh -o /root/wb2api-migrate.sh
+chmod +x /root/wb2api-migrate.sh
+/root/wb2api-migrate.sh --check     # 先体检（只读，不改任何东西）
+/root/wb2api-migrate.sh             # 确认无误后执行迁移
+```
+
+脚本做什么：
+
+1. 备份 `auths/ data/ config.json docker-compose.yml` → `tar.gz`，并**校验压缩包可解开、含关键项**
+2. 记录当前镜像 ID 与 account 基线数
+3. 改 compose 的 `image:` 一行（先备份原文件）
+4. `docker compose pull` —— **失败就中止，不碰容器**
+5. `up -d --force-recreate`（**不用 `down`**）
+6. 自检 3 轮（每轮隔 30s）：容器 running + healthy、`/status` 可达、
+   **账号数 == 基线**、监听仍仅回环
+7. **任一不过 → 自动还原 compose 并重建回旧镜像**
+
+> ⚠️ **迁移会重建网关容器。如果你当前会话的模型正跑在这个网关上，执行瞬间会断线** ——
+> 脚本会自己跑完，不需要你在场。跑完再回来即可。
+
+**手动回滚**：`/root/wb2api-migrate.sh --rollback`（用最近一次备份）。
+
+#### 本套件已同步更新
+
+- `workbuddy2api.sh` **R1.0.3 起，生成的 compose 与 `docker pull` 均改用
+  `ghcr.io/hanawabanana/workbuddy2api:latest`**（新部署不会再指向死镜像）
+- `is_our_compose()` 仍然认得老部署里残留的 `sliverkiss` 字样，
+  否则「同步 compose」会因判定不出归属而不敢覆盖
+
+#### 关于「换个自带面板的版本不就行了？」
+
+`linguo2625469/workbuddy2api-panel`（★2557）确实把管理面板打进了同一个容器，
+看起来更省事。但**对已经部署好的环境，它是更重的改动**：
+
+| | 换镜像（5.10） | 推倒换自带面板 |
+|---|---|---|
+| 改动面 | compose 里 1 行 | 拆 2 个容器 + 重建 |
+| auths | 原地不动，脚本校验数量 | 需迁移，出错要**重新扫码登录全部账号** |
+| 面板数据 | ✅ 全保留 | ❌ 全丢（多密钥/日志/用量/审计/管理员） |
+| Caddy 反代 | 不用动 | 需改指向 |
+| 出错恢复 | 自动回滚 | 手工收拾 |
+
+**已经跑起来的环境，优先做 1 行镜像迁移；想换整合面板，等基线稳住后当独立项目做。**
+
 ---
 
 ## 六、安全基线
@@ -447,7 +542,7 @@ workbuddy2api-manager/
 
 | 版本 | 说明 |
 |---|---|
-| R1.0.3 | **修正 5.8 的认知错误**：原文称「官方作者建议不挂 docker.sock」，实际读上游仓库后确认**反了** —— 官方 compose 里该行默认启用，且注释明确论证「挂 socket 与原生 root 部署权限等价，不是新增风险」。新增 `open-docker-ctl.sh`（诊断 / 开启 / 关闭面板 docker 控制能力，幂等、带 compose 备份与 YAML 校验）。重写 5.8：明确区分 `permission denied`（权限，补 group_add）与 `command not found`（缺镜像 CLI，补组无效），补齐开启/关闭完整流程与决策依据。第六节清单同步修正。 |
+| R1.0.3 | **修正 5.8 的认知错误 + 应对上游删库**。① 原文称「官方作者建议不挂 docker.sock」，实际读上游仓库后确认**反了** —— 官方 compose 里该行默认启用，且注释明确论证「挂 socket 与原生 root 部署权限等价，不是新增风险」；新增 `open-docker-ctl.sh`（诊断 / 开启 / 关闭面板 docker 控制能力，幂等、带 compose 备份与 YAML 校验）；重写 5.8，区分 `permission denied`（补 group_add）与 `command not found`（缺镜像 CLI，补组无效）。② **`Sliverkiss/workbuddy2api` 仓库与 GHCR 镜像双双消失（404 / 403）**，`workbuddy2api.sh` 生成的 compose 与 `docker pull` 改用延续仓库 `ghcr.io/hanawabanana/workbuddy2api:latest`（`is_our_compose()` 仍保留 sliverkiss 特征以兼容老部署）；新增 `wb2api-migrate.sh` 一键迁移（备份校验 + 账号数比对 + 失败自动回滚）与 README 5.10。 |
 | R1.0.2 | **修正网关容器永远 `unhealthy`**：官方镜像 healthcheck 写死探测 `127.0.0.1:7863/healthz`，而本脚本让网关监听 `GW_PORT`（默认 17863），两者不一致导致连续失败（服务实际正常）。生成 compose 时覆盖为实际端口（host/bridge 两个分支都已处理）。此问题会让**告警彻底失效**（永远红 → 真挂了也看不出）。新增 README 5.7/5.8/5.9：unhealthy 修复、面板「无法操作 docker」的权限诊断（`group_add` 与风险）、不依赖面板按钮的上游/面板更新命令与三个坑。 |
 | R1.0.1 | 主脚本 `deploy.sh` 更名为 `workbuddy2api.sh`（脚本内容与 R1.0.0 完全一致，仅自身引用文案随之更新）。原 `deploy.sh` 保留为**兼容外壳**，透传参数到新脚本，旧命令继续可用 —— 已部署的服务器无需任何操作。README 命令示例统一改为新名。 |
 | R1.0.0 | 首个版本。`deploy.sh` 支持部署/更新/停止/重启/状态/日志/重置密码；`NET_MODE=host` 应对 LXC 里 Docker bridge 出网不通；三重自检（端口链 / 登录接口 / 容器出网）；修正面板容器内固定 7864 但映射写成同号导致的 502；修正「每次重跑都打印一个无效的面板密码」；`reset-password` 用与面板一致的 PBKDF2-SHA256 重写哈希并递增会话版本。附 `net-check.sh` 与 `caddy.example.conf`。 |

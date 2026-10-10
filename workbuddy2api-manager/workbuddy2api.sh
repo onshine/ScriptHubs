@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# workbuddy2api + workbuddy-manager 部署 / 更新脚本 R1.0.2
+# workbuddy2api + workbuddy-manager 部署 / 更新脚本 R1.0.3
 #
 # 版本记录见同目录 README.md 末尾「版本记录」表。
 # 适用：1Panel 服务器（Docker + docker compose v2），amd64 / arm64
@@ -32,7 +32,7 @@
 #   ./workbuddy2api.sh logs                 # 跟踪日志
 set -euo pipefail
 
-SCRIPT_VERSION="R1.0.2"
+SCRIPT_VERSION="R1.0.3"
 
 # ============ CONFIG（可用环境变量覆盖） ============
 DOMAIN="${DOMAIN:-workbuddy.example.com}"
@@ -325,6 +325,9 @@ is_our_compose() {
   grep -qF "$COMPOSE_MARKER" "$f" && return 0
   # 兼容 v2 老脚本生成的文件（无 marker，但特征唯一）
   grep -qF "ghcr.io/ithtelab/workbuddy-manager" "$f" && return 0
+  grep -qF "ghcr.io/hanawabanana/workbuddy2api" "$f" && return 0
+  # 老部署仍然写着 sliverkiss（该镜像已删库，见 README 5.10）——
+  # 仍认得它，否则「同步 compose」会因判定不出归属而不敢覆盖。
   grep -qF "ghcr.io/sliverkiss/workbuddy2api" "$f" && return 0
   return 1
 }
@@ -540,7 +543,7 @@ $COMPOSE_MARKER
 # NET_MODE=host：绕过 bridge NAT（LXC 里跑 Docker 常见 bridge 出网不通）
 services:
   wb2api:
-    image: ghcr.io/sliverkiss/workbuddy2api:latest
+    image: ghcr.io/hanawabanana/workbuddy2api:latest
     container_name: ${GW_NAME}
     restart: unless-stopped
     network_mode: host
@@ -573,7 +576,7 @@ sync_compose "$GW_DIR" "上游" <<EOF
 $COMPOSE_MARKER
 services:
   wb2api:
-    image: ghcr.io/sliverkiss/workbuddy2api:latest
+    image: ghcr.io/hanawabanana/workbuddy2api:latest
     container_name: ${GW_NAME}
     restart: unless-stopped
     environment:
@@ -674,7 +677,7 @@ chmod 700 "$GW_DIR/auths"
 # ─── 5. 拉镜像（可选）───
 if [[ "$PULL_IMAGE" == "1" ]]; then
   log "拉取最新镜像（PULL_IMAGE=0 可跳过）"
-  docker pull ghcr.io/sliverkiss/workbuddy2api:latest   || warn "上游镜像拉取失败，将用本地已有镜像"
+  docker pull ghcr.io/hanawabanana/workbuddy2api:latest || warn "上游镜像拉取失败，将用本地已有镜像"
   docker pull ghcr.io/ithtelab/workbuddy-manager:latest || warn "面板镜像拉取失败，将用本地已有镜像"
 fi
 
