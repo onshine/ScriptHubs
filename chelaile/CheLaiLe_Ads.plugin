@@ -1,5 +1,5 @@
 #!name=车来了去广告
-#!desc=去掉「车来了」App 的开屏广告与应用内广告（首页金刚位推广、详情页信息流、公告/活动弹窗、LED 天气条、广告 SDK）。核心是清洗 App 启动下发的广告配置（appToggle/getStatus），让 App 根本不去拉开屏素材，而不是等广告加载出来再拦截。若装了「广告平台拦截器」类插件（拦截 HTTPDNS）效果更稳。
+#!desc=去掉「车来了」App 的开屏广告与应用内广告。R1.0.2：开屏广告由 yg84 广告 SDK 提供（adx 调度层 + ssp 素材下发），已用 [Rule] 整域断掉，规则在插件更新时立即生效、不像脚本会被缓存。应用内广告走清洗启动配置 appToggle/getStatus + 各业务接口。<b>装完请删掉旧插件重新添加</b>，否则 Loon 可能仍在跑缓存的旧脚本。
 #!author=Minis
 #!homepage=https://github.com/onshine/ScriptHubs/tree/main/chelaile
 #!icon=https://raw.githubusercontent.com/luestr/IconResource/main/App_icon/120px/Chelaile.png
@@ -22,6 +22,10 @@ DOMAIN, atrace.chelaile.net.cn, REJECT
 DOMAIN, logs.chelaile.net.cn, REJECT
 # yg84 广告 SDK 的埋点域名：实测一次冷启动打 61 次，纯上报无业务价值
 DOMAIN, ctrace.yg84.com, REJECT
+# ★ 开屏广告的来源：adx 是调度层、ssp 是素材下发层，整域断掉
+#   （用规则而不是脚本，因为规则在插件更新时立即生效，脚本会被 Loon 缓存）
+DOMAIN, adx.yg84.com, REJECT
+DOMAIN, ssp.yg84.com, REJECT
 # 开屏广告的曝光确认像素（请求里 bm= 与 SDK 的 boot_mark 一一对应）
 DOMAIN, m.magicacid.cn, REJECT
 
