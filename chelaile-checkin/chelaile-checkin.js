@@ -1,8 +1,13 @@
 /***************************************************************
  *  车来了 · 每日签到（7天连续签）  |  Loon http-request + cron 脚本
  *  ------------------------------------------------------------
- *  SCRIPT_VERSION : R1.0.5
+ *  SCRIPT_VERSION : R1.0.6
  *  适配           : 车来了 iOS App 7.6.3（web.chelaile.net.cn/api/op-activity-api/daily-act/*）
+ *
+ *  R1.0.6 变更：
+ *    · 抓凭证通知改为「凭证变化时提示」+「每天首次打开签到页提示一次」，
+ *      解决「凭证早就存好了，再开 App 毫无提示、以为失效」的疑虑。
+ *      仍然只读 URL 不碰 body，可用 notify_on_capture 开关关闭。
  *
  *  R1.0.5 变更：
  *    · 恢复 [Argument] 里的 switch 开关写法（抓到凭证时通知 / 已签到也通知 / 调试日志）；
@@ -45,11 +50,12 @@
  *    · 任何异常一律不写坏数据、不误报成功
  ***************************************************************/
 
-const SCRIPT_VERSION = "R1.0.5";
+const SCRIPT_VERSION = "R1.0.6";
 const NAME = "车来了签到";
 const STORE_KEY = "chelaile_checkin_cred";
 const WARN_KEY = "chelaile_checkin_warn";
 const HIT_KEY = "chelaile_checkin_hit";
+const NOTICE_KEY = "chelaile_checkin_notice";
 const API = "https://web.chelaile.net.cn/api/op-activity-api/daily-act/";
 const REFERER = "https://web.chelaile.net.cn/app-relate/everyday-sign/index.html";
 const UA = "Mozilla/5.0 (iPhone; CPU iPhone OS 16_6_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 Chelaile/7.6.3";
@@ -173,22 +179,22 @@ function onCapture() {
 
   if (q.udid && q.accountId) {
     const old = storeRead();
-    if (!old || old.udid !== q.udid || old.accountId !== q.accountId) {
+    const changed = !old || old.udid !== q.udid || old.accountId !== q.accountId;
+    if (changed) {
       storeWrite({ udid: q.udid, accountId: q.accountId, updatedAt: Date.now() });
       log(`已捕获凭证 udid=${mask(q.udid)} accountId=${q.accountId}`);
-      if (WANT_CAPTURE_NOTIFY) {
-        notify(NAME, "✅ 已获取签到凭证", `udid: ${mask(q.udid)}\naccountId: ${q.accountId}\n\n凭证已保存，之后每天自动签到，无需再操作。`);
-      }
     }
-  } else if (q.udid && !q.accountId && WANT_CAPTURE_NOTIFY) {
-    // 钩子命中了但 URL 里没有 accountId：只提示一次，避免刷屏
-    let warned = false;
-    try { warned = $persistentStore.read(WARN_KEY) === "1"; } catch (_) {}
-    if (!warned) {
-      log("命中请求但缺少 accountId: " + String(url).slice(0, 150));
-      try { $persistentStore.write("1", WARN_KEY); } catch (_) {}
-      notify(NAME, "⚠️ 抓到请求但缺 accountId",
-        "已命中车来了接口，但 URL 里没有 accountId。\n请重新打开车来了 →「每日签到」页面再试一次。\n\n（若反复出现，请把这条日志发我）");
+    if (WANT_CAPTURE_NOTIFY) {
+      let last = "";
+      try { last = $persistentStore.read(NOTICE_KEY) || ""; } catch (_) {}
+      const today = localDate();
+      if (changed) {
+        try { $persistentStore.write(today, NOTICE_KEY); } catch (_) {}
+        notify(NAME, "✅ 已获取签到凭证", `udid: ${mask(q.udid)}\naccountId: ${q.accountId}\n\n凭证已保存，之后每天自动签到，无需再操作。`);
+      } else if (last !== today) {
+        try { $persistentStore.write(today, NOTICE_KEY); } catch (_) {}
+        notify(NAME, "✅ 凭证正常", `已成功拦到车来了的请求，凭证可用。\nudid: ${mask(q.udid)}\naccountId: ${q.accountId}\n\n（每天首次打开签到页提示一次，可在插件开关里关闭）`);
+      }
     }
   }
   return done({});

@@ -4,7 +4,7 @@
 
 - 插件：`CheLaiLe_Checkin.plugin`
 - 脚本：`chelaile-checkin.js`
-- 版本：**R1.0.5**
+- 版本：**R1.0.6**
 - 适配：车来了 iOS 7.6.3 ｜ Loon ≥ 3.5.1
 
 ---
@@ -109,6 +109,15 @@ https://raw.githubusercontent.com/onshine/ScriptHubs/main/chelaile-checkin/CheLa
 - `status=0002` + `非法请求` → 凭证不对（多半是 `accountId` 填错或缺失）
 - 活动下线/换期 → 报 `读取活动配置失败`，等新一期活动上线
 
+**Q：打开车来了 App，为什么没有收到通知？**
+通知刻意做成**不刷屏**：
+- **凭证有变化**（首次抓到 / 换了账号）→ 提示一次「✅ 已获取签到凭证」
+- 其余情况**每天首次**打开签到页 → 提示一次「✅ 凭证正常」
+- 同一天内重复打开 → 不再提示
+
+所以「没有提示」通常意味着凭证早就抓好了、一切正常。想确认可以：
+把 `debug` 打开看运行日志，或手动跑一次 cron——日志里会显示 `凭证来源: 抓包存储`。
+
 **Q：会不会误签 / 重复签？**
 不会。脚本先用 `config` 判断 `signRewards[].signDate == 今天`，
 已签就直接跳过，连 `signin` 都不发。
@@ -127,6 +136,7 @@ https://raw.githubusercontent.com/onshine/ScriptHubs/main/chelaile-checkin/CheLa
 
 | 版本 | 说明 |
 |---|---|
+| R1.0.6 | 抓凭证通知改为「**凭证变化时提示** + **每天首次打开签到页提示一次**」，仍只读 URL 不碰 body。解决「凭证早就存好了、再开 App 毫无提示，以为失效」的疑虑。 |
 | R1.0.5 | 恢复 `[Argument]` 的 switch 开关（抓到凭证时通知 / 已签到也通知 / 调试日志）；`cron`、`udid`、`accountId` 保持纯文本值。**教训：`[Argument]` 里用 `input,"默认值"` 会导致 Loon 解析不出 `[Script]` 条目**，本目录已改为纯文本值写法。脚本逻辑未变。 |
 | R1.0.4 | 插件格式整改：`[Argument]` 改用纯文本值写法（修复 Loon 解析不出脚本条目的问题）；`[Script]` 段无注释行；「首次命中」诊断通知改为无条件触发。脚本 `readArg` 兼容对象/数组两种传参。 |
 | R1.0.3 | 抓包匹配范围放宽到整个 `web.chelaile.net.cn`（打开签到页即命中）；新增「首次命中」诊断通知；`[Script]` 段移除注释行、`loon_version` 降到 `3.5.0(975)`。 |
