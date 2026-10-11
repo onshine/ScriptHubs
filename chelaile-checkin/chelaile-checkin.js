@@ -1,8 +1,13 @@
 /***************************************************************
  *  车来了 · 每日签到（7天连续签）  |  Loon http-request + cron 脚本
  *  ------------------------------------------------------------
- *  SCRIPT_VERSION : R1.0.4
+ *  SCRIPT_VERSION : R1.0.5
  *  适配           : 车来了 iOS App 7.6.3（web.chelaile.net.cn/api/op-activity-api/daily-act/*）
+ *
+ *  R1.0.5 变更：
+ *    · 恢复 [Argument] 里的 switch 开关写法（抓到凭证时通知 / 已签到也通知 / 调试日志）；
+ *      cron、udid、accountId 仍保持纯文本值（input,"…" 会导致 Loon 解析不出条目）。
+ *      脚本逻辑未变。
  *
  *  R1.0.4 变更：
  *    · 插件 [Argument] 改用纯文本值写法（与 9nb 插件一致），去掉 input,"..."；
@@ -40,7 +45,7 @@
  *    · 任何异常一律不写坏数据、不误报成功
  ***************************************************************/
 
-const SCRIPT_VERSION = "R1.0.4";
+const SCRIPT_VERSION = "R1.0.5";
 const NAME = "车来了签到";
 const STORE_KEY = "chelaile_checkin_cred";
 const WARN_KEY = "chelaile_checkin_warn";

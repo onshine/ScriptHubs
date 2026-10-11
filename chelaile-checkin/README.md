@@ -4,7 +4,7 @@
 
 - 插件：`CheLaiLe_Checkin.plugin`
 - 脚本：`chelaile-checkin.js`
-- 版本：**R1.0.4**
+- 版本：**R1.0.5**
 - 适配：车来了 iOS 7.6.3 ｜ Loon ≥ 3.5.1
 
 ---
@@ -97,6 +97,11 @@ https://raw.githubusercontent.com/onshine/ScriptHubs/main/chelaile-checkin/CheLa
 服务端不校验（详见第一节表格）。所以本插件**不需要 `requires-body`**，
 抓包钩子只读 URL 就够，开销极小。
 
+**Q：改了插件的 Argument 之后，Loon 里脚本条目消失了？**
+`[Argument]` 里**不要用 `input,"默认值"` 写法**——实测会导致 Loon 解析不出整个 `[Script]` 段
+（表现为插件装上后没有任何条目、脚本完全不执行）。用**纯文本值**（如 `cron = 5 8 * * *`）
+或 `switch,true/false` 都是正常的。
+
 **Q：签到失败怎么办？**
 打开 `debug` 开关跑一次，看运行日志里的 `config 原始响应` / `signin 原始响应`。常见情况：
 - `status=1002` + `今日已签到` → 已经签过了，属正常
@@ -122,7 +127,8 @@ https://raw.githubusercontent.com/onshine/ScriptHubs/main/chelaile-checkin/CheLa
 
 | 版本 | 说明 |
 |---|---|
-| R1.0.4 | 插件格式整改：`[Argument]` 改用纯文本值写法（与 9nb 插件一致，去掉 `input,"…"`）；`[Script]` 段无注释行。「首次命中」诊断通知改为无条件触发。脚本 `readArg` 兼容对象/数组两种传参。 |
+| R1.0.5 | 恢复 `[Argument]` 的 switch 开关（抓到凭证时通知 / 已签到也通知 / 调试日志）；`cron`、`udid`、`accountId` 保持纯文本值。**教训：`[Argument]` 里用 `input,"默认值"` 会导致 Loon 解析不出 `[Script]` 条目**，本目录已改为纯文本值写法。脚本逻辑未变。 |
+| R1.0.4 | 插件格式整改：`[Argument]` 改用纯文本值写法（修复 Loon 解析不出脚本条目的问题）；`[Script]` 段无注释行；「首次命中」诊断通知改为无条件触发。脚本 `readArg` 兼容对象/数组两种传参。 |
 | R1.0.3 | 抓包匹配范围放宽到整个 `web.chelaile.net.cn`（打开签到页即命中）；新增「首次命中」诊断通知；`[Script]` 段移除注释行、`loon_version` 降到 `3.5.0(975)`。 |
 | R1.0.2 | 抓到凭证后**推送通知**（原来只写运行日志，用户看不到反馈）；新增 `notify_on_capture` 开关；命中请求但缺 `accountId` 时提示一次排查线索。 |
 | R1.0.1 | `notify_when_signed` 默认改为**开**：当天已签到时也推送通知（脚本侧同步改为「未显式传 `false` 即通知」，手动挂载时不再静默）。签到逻辑无变化。 |
