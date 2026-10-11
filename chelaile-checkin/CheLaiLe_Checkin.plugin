@@ -10,7 +10,7 @@
 cron = input,"5 8 * * *",tag=每日执行时间,desc=cron 表达式，默认每天 08:05
 udid = input,"",tag=UDID（一般留空）,desc=留空则用抓包自动捕获的值。手动填写时为 40 位十六进制
 accountId = input,"",tag=账号ID（一般留空）,desc=留空则用抓包自动捕获的值。手动填写时为数字
-notify_when_signed = switch,false,tag=已签到也通知,desc=当天已签到时也推送通知；默认只在签到有动作或出错时通知
+notify_when_signed = switch,true,tag=已签到也通知,desc=当天已签到时也推送通知（默认开）。关掉后只在签到有动作或出错时通知
 debug = switch,false,tag=调试日志,desc=在运行日志里输出接口原始响应，排查时打开
 
 [Script]

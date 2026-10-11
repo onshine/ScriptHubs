@@ -4,7 +4,7 @@
 
 - 插件：`CheLaiLe_Checkin.plugin`
 - 脚本：`chelaile-checkin.js`
-- 版本：**R1.0.0**
+- 版本：**R1.0.1**
 - 适配：车来了 iOS 7.6.3 ｜ Loon ≥ 3.5.1
 
 ---
@@ -54,7 +54,7 @@ https://raw.githubusercontent.com/onshine/ScriptHubs/main/chelaile-checkin/CheLa
 | `cron` | `5 8 * * *` | 每日执行时间，默认 08:05 |
 | `udid` | 空 | 一般留空，用抓包自动捕获的值 |
 | `accountId` | 空 | 同上 |
-| `notify_when_signed` | 关 | 当天已签到时是否也推送通知 |
+| `notify_when_signed` | **开** | 当天已签到时是否也推送通知；关掉后只在签到有动作或出错时通知 |
 | `debug` | 关 | 输出接口原始响应，排查时打开 |
 
 ## 四、FAQ
@@ -92,4 +92,5 @@ https://raw.githubusercontent.com/onshine/ScriptHubs/main/chelaile-checkin/CheLa
 
 | 版本 | 说明 |
 |---|---|
+| R1.0.1 | `notify_when_signed` 默认改为**开**：当天已签到时也推送通知（脚本侧同步改为「未显式传 `false` 即通知」，手动挂载时不再静默）。签到逻辑无变化。 |
 | R1.0.0 | 首版。基于真实 HAR 逆向，凭证 `udid`+`accountId`，带抓包自动捕获 + 已签跳过 |

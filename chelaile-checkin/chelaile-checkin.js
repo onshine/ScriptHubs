@@ -1,8 +1,12 @@
 /***************************************************************
  *  车来了 · 每日签到（7天连续签）  |  Loon http-request + cron 脚本
  *  ------------------------------------------------------------
- *  SCRIPT_VERSION : R1.0.0
+ *  SCRIPT_VERSION : R1.0.1
  *  适配           : 车来了 iOS App 7.6.3（web.chelaile.net.cn/api/op-activity-api/daily-act/*）
+ *
+ *  R1.0.1 变更：
+ *    · notify_when_signed 默认改为「开」——当天已签到时也推送通知；
+ *      脚本侧同步改为「未显式传 false 即通知」，避免手动挂载时静默。
  *
  *  实测结论（2026-10-11 基于真实 HAR 逆向 + 在线逐条验证）：
  *    · 凭证只需两个参数：udid + accountId
@@ -20,7 +24,7 @@
  *    · 任何异常一律不写坏数据、不误报成功
  ***************************************************************/
 
-const SCRIPT_VERSION = "R1.0.0";
+const SCRIPT_VERSION = "R1.0.1";
 const NAME = "车来了签到";
 const STORE_KEY = "chelaile_checkin_cred";
 const API = "https://web.chelaile.net.cn/api/op-activity-api/daily-act/";
@@ -135,7 +139,7 @@ function onCapture() {
 async function onCron() {
   const arg = readArg();
   const DEBUG = String(arg.debug) === "true";
-  const WANT_SIGNED_NOTIFY = String(arg.notify_when_signed) === "true";
+  const WANT_SIGNED_NOTIFY = String(arg.notify_when_signed) !== "false";   // 默认开启，显式传 false 才关闭
   log(`脚本版本 ${SCRIPT_VERSION}`);
 
   // 凭证优先级：Argument 手填 > 抓包存储
