@@ -1,5 +1,5 @@
 #!name=Gemini API 多节点巡检
-#!desc=定时探测自建 gemini-web2api-go 节点（支持 IPv6 多台小鸡），检查存活、版本、模型数、API Key 有效性、Cookie 是否过期导致 Pro 降级、是否被限流；异常时推送通知。多节点部署运维刚需。
+#!desc=定时探测自建 gemini-web2api-go 节点（支持 IPv6 多台小鸡），检查存活、版本、模型数、API Key 有效性、Cookie 是否过期导致 Pro 降级、是否被限流；异常时推送通知。多节点部署运维刚需。<b>更新后请删除旧插件重新添加</b>，否则 Loon 可能仍在运行缓存里的旧脚本。
 #!author=Minis
 #!homepage=https://github.com/onshine/ScriptHubs/tree/main/gemini-web2api
 #!icon=https://www.google.com/s2/favicons?domain=gemini.google.com&sz=128

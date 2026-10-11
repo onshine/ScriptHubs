@@ -1,5 +1,5 @@
 #!name=9NB.DE 每日签到
-#!desc=9NB.DE 论坛多账号自动签到。Cookie 模式：在密码栏粘贴 bbs_auth=xxx（可从 VPS 或浏览器导出）。默认每天 08:05 执行。
+#!desc=9NB.DE 论坛多账号自动签到。Cookie 模式：在密码栏粘贴 bbs_auth=xxx（可从 VPS 或浏览器导出）。默认每天 08:05 执行。<b>更新后请删除旧插件重新添加</b>，否则 Loon 可能仍在运行缓存里的旧脚本。
 #!author=Minis
 #!homepage=https://github.com/onshine/ScriptHubs/tree/main/9nb-checkin
 #!icon=https://9nb.de/favicon.ico

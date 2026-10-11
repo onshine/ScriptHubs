@@ -1,5 +1,5 @@
 #!name=QQ群名片守卫
-#!desc=定时巡检 QQ 群成员名片（OneBot v11 / go-cqhttp / NapCat / Lagrange HTTP API）。名片不含约定关键词的成员按「宽容模式」分级处理：观察期内只在群里 @ 提醒改名，连续多轮仍不合规才踢出。内置全角/大小写/符号模糊匹配、管理员与新人豁免、白名单、单轮上限、比例熔断，防误伤防清群。首次使用请先用 report 模式跑几天。
+#!desc=定时巡检 QQ 群成员名片（OneBot v11 / go-cqhttp / NapCat / Lagrange HTTP API）。名片不含约定关键词的成员按「宽容模式」分级处理：观察期内只在群里 @ 提醒改名，连续多轮仍不合规才踢出。内置全角/大小写/符号模糊匹配、管理员与新人豁免、白名单、单轮上限、比例熔断，防误伤防清群。首次使用请先用 report 模式跑几天。<b>更新后请删除旧插件重新添加</b>，否则 Loon 可能仍在运行缓存里的旧脚本。
 #!author=Minis
 #!homepage=https://github.com/onshine/ScriptHubs/tree/main/qq-group-guard
 #!icon=https://raw.githubusercontent.com/58xinian/icon/master/QQ.png
