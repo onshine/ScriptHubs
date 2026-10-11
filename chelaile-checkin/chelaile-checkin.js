@@ -1,14 +1,19 @@
 /***************************************************************
  *  车来了 · 每日签到（7天连续签）  |  Loon http-request + cron 脚本
  *  ------------------------------------------------------------
- *  SCRIPT_VERSION : R1.0.3
+ *  SCRIPT_VERSION : R1.0.4
  *  适配           : 车来了 iOS App 7.6.3（web.chelaile.net.cn/api/op-activity-api/daily-act/*）
+ *
+ *  R1.0.4 变更：
+ *    · 插件 [Argument] 改用纯文本值写法（与 9nb 插件一致），去掉 input,"..."；
+ *      [Script] 段去掉全部注释行，与实测可用插件格式完全对齐。
+ *    · readArg 兼容对象 / 位置数组两种传参形态。
+ *    · 「首次命中」诊断通知改为无条件触发（只提示一次），便于定位钩子是否工作。
  *
  *  R1.0.3 变更：
  *    · 抓包匹配范围放宽到整个 web.chelaile.net.cn（原来只匹配 /api/op-activity-api/），
- *      这样打开签到页本身就会命中，配合下面的诊断通知可判断钩子是否工作。
- *    · 新增「首次命中」诊断通知（debug=开时）：命中时提示一次，
- *      用于区分「MITM 没生效（毫无反应）」和「抓到了但拿不到凭证」。
+ *      这样打开签到页本身就会命中。
+ *    · 新增「首次命中」诊断通知（debug=开时）。
  *
  *  R1.0.2 变更：
  *    · 抓到凭证后**推送通知**（R1.0.1 只写运行日志，用户看不到任何反馈）；
@@ -35,7 +40,7 @@
  *    · 任何异常一律不写坏数据、不误报成功
  ***************************************************************/
 
-const SCRIPT_VERSION = "R1.0.3";
+const SCRIPT_VERSION = "R1.0.4";
 const NAME = "车来了签到";
 const STORE_KEY = "chelaile_checkin_cred";
 const WARN_KEY = "chelaile_checkin_warn";
@@ -57,8 +62,14 @@ function notify(title, subtitle, body) {
 }
 function readArg() {
   if (typeof $argument === "undefined") return {};
-  if (typeof $argument === "string") { try { return JSON.parse($argument); } catch (_) { return {}; } }
-  return $argument || {};
+  let a = $argument;
+  if (typeof a === "string") { try { a = JSON.parse(a); } catch (_) { return {}; } }
+  if (!a || typeof a !== "object") return {};
+  // 兼容位置数组写法 argument=[{udid},{accountId},...]
+  if (Array.isArray(a)) {
+    return { udid: a[0], accountId: a[1], notify_when_signed: a[2], notify_on_capture: a[3], debug: a[4] };
+  }
+  return a;
 }
 function storeRead() {
   if (typeof $persistentStore === "undefined") return null;
@@ -141,7 +152,7 @@ function onCapture() {
   const DEBUG = String(arg.debug) === "true";
 
   // 【诊断】首次命中时提示一次：用来区分「MITM 没生效」和「抓到了但解析不出凭证」
-  if (DEBUG) {
+  {
     let hit = false;
     try { hit = $persistentStore.read(HIT_KEY) === "1"; } catch (_) {}
     if (!hit) {
