@@ -1,8 +1,14 @@
 /***************************************************************
  *  车来了 · 每日签到（7天连续签）  |  Loon http-request + cron 脚本
  *  ------------------------------------------------------------
- *  SCRIPT_VERSION : R1.0.2
+ *  SCRIPT_VERSION : R1.0.3
  *  适配           : 车来了 iOS App 7.6.3（web.chelaile.net.cn/api/op-activity-api/daily-act/*）
+ *
+ *  R1.0.3 变更：
+ *    · 抓包匹配范围放宽到整个 web.chelaile.net.cn（原来只匹配 /api/op-activity-api/），
+ *      这样打开签到页本身就会命中，配合下面的诊断通知可判断钩子是否工作。
+ *    · 新增「首次命中」诊断通知（debug=开时）：命中时提示一次，
+ *      用于区分「MITM 没生效（毫无反应）」和「抓到了但拿不到凭证」。
  *
  *  R1.0.2 变更：
  *    · 抓到凭证后**推送通知**（R1.0.1 只写运行日志，用户看不到任何反馈）；
@@ -29,10 +35,11 @@
  *    · 任何异常一律不写坏数据、不误报成功
  ***************************************************************/
 
-const SCRIPT_VERSION = "R1.0.2";
+const SCRIPT_VERSION = "R1.0.3";
 const NAME = "车来了签到";
 const STORE_KEY = "chelaile_checkin_cred";
 const WARN_KEY = "chelaile_checkin_warn";
+const HIT_KEY = "chelaile_checkin_hit";
 const API = "https://web.chelaile.net.cn/api/op-activity-api/daily-act/";
 const REFERER = "https://web.chelaile.net.cn/app-relate/everyday-sign/index.html";
 const UA = "Mozilla/5.0 (iPhone; CPU iPhone OS 16_6_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 Chelaile/7.6.3";
@@ -127,10 +134,25 @@ function mask(v) { v = String(v || ""); return v.length > 8 ? v.slice(0, 6) + "*
 function onCapture() {
   const url = ($request && $request.url) || "";
   if (STATIC_EXT.test(url)) return done({});          // 二重保险：静态资源一律放行
-  if (!/web\.chelaile\.net\.cn\/api\/op-activity-api\//.test(url)) return done({});
+  if (!/web\.chelaile\.net\.cn\//.test(url)) return done({});
 
   const arg = readArg();
   const WANT_CAPTURE_NOTIFY = String(arg.notify_on_capture) !== "false";   // 默认开
+  const DEBUG = String(arg.debug) === "true";
+
+  // 【诊断】首次命中时提示一次：用来区分「MITM 没生效」和「抓到了但解析不出凭证」
+  if (DEBUG) {
+    let hit = false;
+    try { hit = $persistentStore.read(HIT_KEY) === "1"; } catch (_) {}
+    if (!hit) {
+      log("[钩子] 首次命中: " + url.slice(0, 200));
+      try { $persistentStore.write("1", HIT_KEY); } catch (_) {}
+      notify(NAME, "✅ 钩子已触发", "已成功拦到车来了的请求，说明 MITM 工作正常。\n\n" + url.slice(0, 150));
+    } else {
+      log("[钩子] 命中: " + url.slice(0, 200));
+    }
+  }
+
   const q = pickQuery(url);
 
   if (q.udid && q.accountId) {

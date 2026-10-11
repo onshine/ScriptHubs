@@ -4,7 +4,7 @@
 
 - 插件：`CheLaiLe_Checkin.plugin`
 - 脚本：`chelaile-checkin.js`
-- 版本：**R1.0.2**
+- 版本：**R1.0.3**
 - 适配：车来了 iOS 7.6.3 ｜ Loon ≥ 3.5.1
 
 ---
@@ -59,7 +59,18 @@ https://raw.githubusercontent.com/onshine/ScriptHubs/main/chelaile-checkin/CheLa
 
 ## 四、抓不到凭证怎么办（常见问题）
 
-抓凭证靠 `http-request` 钩子，**前提是 Loon 能解开车来了的 HTTPS**。按顺序排查：
+抓凭证靠 `http-request` 钩子，**前提是 Loon 能解开车来了的 HTTPS**。
+
+**先做一次二分判断**（`debug` 打开时有效，默认已开）：
+
+| 现象 | 结论 | 该修什么 |
+|---|---|---|
+| 弹「✅ 钩子已触发」 | MITM 正常，钩子能拦到请求 | 问题在凭证解析 → 第 3、4 步 |
+| 弹「⚠️ 抓到请求但缺 accountId」 | MITM 正常 | 重新进一次「每日签到」页 |
+| 弹「✅ 已获取签到凭证」 | 全好了 | 无需操作，等每天自动签到 |
+| **什么都不弹** | 钩子根本没被触发 | MITM 或证书问题 → 第 1、2 步 |
+
+按顺序排查：
 
 1. **Loon 的 MITM 开关是否已打开**
    Loon → 配置 →（对应配置）→ `MitM` 里能看到 `web.chelaile.net.cn`（插件会自动 `%APPEND%`）。
@@ -111,6 +122,7 @@ https://raw.githubusercontent.com/onshine/ScriptHubs/main/chelaile-checkin/CheLa
 
 | 版本 | 说明 |
 |---|---|
+| R1.0.3 | 抓包匹配范围放宽到整个 `web.chelaile.net.cn`（打开签到页即命中）；新增「首次命中」诊断通知，用于区分「MITM 没生效」和「抓到了但取不到凭证」；`[Script]` 段移除注释行、`loon_version` 降到 `3.5.0(975)`（与实测可用插件格式对齐）。 |
 | R1.0.2 | 抓到凭证后**推送通知**（原来只写运行日志，用户看不到反馈）；新增 `notify_on_capture` 开关；命中请求但缺 `accountId` 时提示一次排查线索。 |
 | R1.0.1 | `notify_when_signed` 默认改为**开**：当天已签到时也推送通知（脚本侧同步改为「未显式传 `false` 即通知」，手动挂载时不再静默）。签到逻辑无变化。 |
 | R1.0.0 | 首版。基于真实 HAR 逆向，凭证 `udid`+`accountId`，带抓包自动捕获 + 已签跳过 |
