@@ -1,8 +1,13 @@
 /***************************************************************
  *  车来了 · 每日签到（7天连续签）  |  Loon http-request + cron 脚本
  *  ------------------------------------------------------------
- *  SCRIPT_VERSION : R1.0.1
+ *  SCRIPT_VERSION : R1.0.2
  *  适配           : 车来了 iOS App 7.6.3（web.chelaile.net.cn/api/op-activity-api/daily-act/*）
+ *
+ *  R1.0.2 变更：
+ *    · 抓到凭证后**推送通知**（R1.0.1 只写运行日志，用户看不到任何反馈）；
+ *      可用 notify_on_capture=false 关闭。同一个凭证只提示一次，不刷屏。
+ *    · 钩子被命中但 URL 里缺 accountId 时，提示一次排查线索。
  *
  *  R1.0.1 变更：
  *    · notify_when_signed 默认改为「开」——当天已签到时也推送通知；
@@ -24,9 +29,10 @@
  *    · 任何异常一律不写坏数据、不误报成功
  ***************************************************************/
 
-const SCRIPT_VERSION = "R1.0.1";
+const SCRIPT_VERSION = "R1.0.2";
 const NAME = "车来了签到";
 const STORE_KEY = "chelaile_checkin_cred";
+const WARN_KEY = "chelaile_checkin_warn";
 const API = "https://web.chelaile.net.cn/api/op-activity-api/daily-act/";
 const REFERER = "https://web.chelaile.net.cn/app-relate/everyday-sign/index.html";
 const UA = "Mozilla/5.0 (iPhone; CPU iPhone OS 16_6_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 Chelaile/7.6.3";
@@ -122,12 +128,29 @@ function onCapture() {
   const url = ($request && $request.url) || "";
   if (STATIC_EXT.test(url)) return done({});          // 二重保险：静态资源一律放行
   if (!/web\.chelaile\.net\.cn\/api\/op-activity-api\//.test(url)) return done({});
+
+  const arg = readArg();
+  const WANT_CAPTURE_NOTIFY = String(arg.notify_on_capture) !== "false";   // 默认开
   const q = pickQuery(url);
+
   if (q.udid && q.accountId) {
     const old = storeRead();
     if (!old || old.udid !== q.udid || old.accountId !== q.accountId) {
       storeWrite({ udid: q.udid, accountId: q.accountId, updatedAt: Date.now() });
       log(`已捕获凭证 udid=${mask(q.udid)} accountId=${q.accountId}`);
+      if (WANT_CAPTURE_NOTIFY) {
+        notify(NAME, "✅ 已获取签到凭证", `udid: ${mask(q.udid)}\naccountId: ${q.accountId}\n\n凭证已保存，之后每天自动签到，无需再操作。`);
+      }
+    }
+  } else if (q.udid && !q.accountId && WANT_CAPTURE_NOTIFY) {
+    // 钩子命中了但 URL 里没有 accountId：只提示一次，避免刷屏
+    let warned = false;
+    try { warned = $persistentStore.read(WARN_KEY) === "1"; } catch (_) {}
+    if (!warned) {
+      log("命中请求但缺少 accountId: " + String(url).slice(0, 150));
+      try { $persistentStore.write("1", WARN_KEY); } catch (_) {}
+      notify(NAME, "⚠️ 抓到请求但缺 accountId",
+        "已命中车来了接口，但 URL 里没有 accountId。\n请重新打开车来了 →「每日签到」页面再试一次。\n\n（若反复出现，请把这条日志发我）");
     }
   }
   return done({});
