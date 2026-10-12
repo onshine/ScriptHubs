@@ -4,7 +4,7 @@
 
 - 插件：`CheLaiLe_Checkin.plugin`
 - 脚本：`chelaile-checkin.js`
-- 版本：**R1.0.6**
+- 版本：**R1.0.7**
 - 适配：车来了 iOS 7.6.3 ｜ Loon ≥ 3.5.1
 
 ---
@@ -19,19 +19,39 @@ H5 页面   https://web.chelaile.net.cn/app-relate/everyday-sign/index.html
 每日签到  GET /api/op-activity-api/daily-act/signin
 ```
 
-**实测得到的五条结论**（2026-10-11，HAR 逆向 + 逐条在线验证）：
+### ★★ 读接口和写接口的鉴权不一样（这是最容易踩的坑）
+
+| 接口 | 必需参数 | 少了会怎样 |
+|---|---|---|
+| `config`（读） | `udid` + `accountId` | 只有 `udid` 会拿到**匿名数据**（`signRewards[0].status="unsigned"`、`activityId="1"`） |
+| `signin`（写） | `udid` + `accountId` + **`secret`** + **`s`** | `0002 非法请求`；补了 `secret` 还缺 `s` → `400 Missing Request Parameter: s` |
+
+**`0002 非法请求` 的真实含义是「缺 secret」，不是「凭证伪造」** —— 我最初把它误判成后者，
+白绕了很久。实测三种组合：
+
+```
+udid + accountId                  → 0002 非法请求
+udid + accountId + secret         → 400 Missing Request Parameter: s
+udid + accountId + secret + s=1   → 00 签到成功   ✅
+```
+
+`s` 只要**非空**即可（实测填 `1` 就能签到成功），所以脚本给它默认值 `1`。
+
+### 其它四条实测结论
 
 | # | 结论 | 验证方式 |
 |---|---|---|
-| 1 | **凭证只需 `udid` + `accountId` 两个参数** | 5 个参数排列组合穷举 31 种，只有含这两个的组合能返回本人数据 |
-| 2 | **`secret` / `cityId` / `s` 可以完全省略** | 去掉后返回数据与完整参数逐字节一致 |
-| 3 | **Cookie 完全不需要** | 不带任何 Cookie 同样返回 200 正常数据 |
-| 4 | **`sign` / `signature` / `nonce` / `h5TimeStamp` 是装饰性的** | 伪造签名、甚至完全不带，均返回 200 |
-| 5 | 请求头里**必须有 `Referer`**（值不校验） | 缺失 → 400；填成首页地址 → 仍然 200 |
+| 1 | **Cookie 完全不需要** | 不带任何 Cookie 同样返回 200 正常数据 |
+| 2 | **`signature` / `nonce` / `h5TimeStamp` 服务端并不校验** | 伪造签名、甚至完全不带，均返回 200 |
+| 3 | 请求头里**必须有 `Referer`**（值不校验） | 缺失 → 400；填成首页地址 → 仍然 200 |
+| 4 | `secret` **不需要**自己算，从 App 请求 URL 里就能抓到 | 见下方说明 |
 
-> ⚠️ 第 1 条有个坑值得单独说：**只带 `udid` 也能通过 HTTP 校验**，但返回的是**匿名数据**
-> （`signRewards[0].status = "unsigned"`、`activityId` 变成 `"1"`）。必须同时带 `accountId`
-> 才能拿到本人账户状态。所以判断"接口通不通"不能只看状态码，**要看数据是不是自己的**。
+> H5 页面里确实会调 `sdkCall("crypto", …)` 算一个 `signature`，但那是走
+> **车来了 App 的原生桥**（`window.cll`）实现的，网页里没有 JS 兜底实现，
+> 我们在脚本里复现不了 —— **好在服务端压根不校验它**，所以不影响自动化。
+
+> 第 2 条那个「只带 `udid` 返回匿名数据」的坑值得记住：**判断接口通不通不能只看状态码，
+> 要看数据是不是自己的。**
 
 ## 二、安装
 
@@ -53,6 +73,8 @@ https://raw.githubusercontent.com/onshine/ScriptHubs/main/chelaile-checkin/CheLa
 | `cron` | `5 8 * * *` | 每日执行时间，默认 08:05 |
 | `udid` | 空 | 一般留空，用抓包自动捕获的值。手动填写时为 40 位十六进制 |
 | `accountId` | 空 | 一般留空，用抓包自动捕获的值。手动填写时为数字 |
+| `secret` | 空 | **一般留空**，用抓包自动捕获的值（32 位十六进制）。签到接口必须带，**少了必返回 `0002 非法请求`**；抓不到时可手动粘贴 |
+| `s` | `1` | 签到接口要求非空即可，默认 `1`，一般不用改 |
 | `notify_on_capture` | **开** | 抓到凭证时推送一次通知（同一凭证只提示一次） |
 | `notify_when_signed` | **开** | 当天已签到时也推送通知；关掉后只在签到有动作或出错时通知 |
 | `debug` | 关 | 输出接口原始响应，排查时打开 |
@@ -136,6 +158,7 @@ https://raw.githubusercontent.com/onshine/ScriptHubs/main/chelaile-checkin/CheLa
 
 | 版本 | 说明 |
 |---|---|
+| R1.0.7 | ★ **修「签到一直失败、0002 非法请求」**。根因：`signin` 与 `config` 鉴权不同 —— 签到**必须**带 `secret` 和 `s`，只带 `udid`+`accountId` 一律 `0002`。抓包钩子现在一并收下 `secret`/`s`，cron 三个接口都带上；`0002` 会明确提示「secret 缺失」而非笼统报错。**同时修掉插件传参与脚本解析不一致**：插件写的是 `argument=[{"udid":…,"accountId":…}]`，脚本原来按位置数组解析，会把整个对象当成 `udid`（`[object Object]`）—— 现在两种形态都兼容并加值类型守卫。**安全加固**：日志与通知里的 URL 一律脱敏（原来「首次命中」会把带 `secret` 的完整 URL 推成通知，锁屏可见），`debug` 默认改为关。 |
 | R1.0.6 | 抓凭证通知改为「**凭证变化时提示** + **每天首次打开签到页提示一次**」，仍只读 URL 不碰 body。解决「凭证早就存好了、再开 App 毫无提示，以为失效」的疑虑。 |
 | R1.0.5 | 恢复 `[Argument]` 的 switch 开关（抓到凭证时通知 / 已签到也通知 / 调试日志）；`cron`、`udid`、`accountId` 保持纯文本值。**教训：`[Argument]` 里用 `input,"默认值"` 会导致 Loon 解析不出 `[Script]` 条目**，本目录已改为纯文本值写法。脚本逻辑未变。 |
 | R1.0.4 | 插件格式整改：`[Argument]` 改用纯文本值写法（修复 Loon 解析不出脚本条目的问题）；`[Script]` 段无注释行；「首次命中」诊断通知改为无条件触发。脚本 `readArg` 兼容对象/数组两种传参。 |

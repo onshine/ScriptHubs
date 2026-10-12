@@ -1,8 +1,22 @@
 /***************************************************************
  *  车来了 · 每日签到（7天连续签）  |  Loon http-request + cron 脚本
  *  ------------------------------------------------------------
- *  SCRIPT_VERSION : R1.0.6
+ *  SCRIPT_VERSION : R1.0.7
  *  适配           : 车来了 iOS App 7.6.3（web.chelaile.net.cn/api/op-activity-api/daily-act/*）
+ *
+ *  R1.0.7 变更（★ 修「签到一直失败」）：
+ *    · 实测发现 signin 与 config 的鉴权**不一样**：
+ *        - config 只要 udid + accountId 就能读
+ *        - signin 还**必须**带 secret 和 s，否则一律返回
+ *          {"status":"0002","errmsg":"非法请求"} —— 而 0002 一直被我误判成「凭证伪造」
+ *      现在抓包钩子会一并收下 secret / s，cron 三个接口都带上。
+ *    · s 只要非空即可（实测填 "1" 也能签到成功），默认 "1"。
+ *    · 0002 现在会提示「secret 缺失，请重新打开一次每日签到页」而不是笼统报错。
+ *    · ★ 修插件传参与脚本解析不一致：插件写的是 argument=[{"udid":…,"accountId":…}]，
+ *      而脚本原来按「位置数组」解析，会把整个对象当成 udid（"[object Object]"）。
+ *      现在两种形态都兼容，并加了值类型守卫。
+ *    · ⚠️ 安全：日志与通知里的 URL 一律脱敏（原来「首次命中」会把带 secret 的完整
+ *      URL 推成通知，锁屏直接可见）。debug 默认改为关。
  *
  *  R1.0.6 变更：
  *    · 抓凭证通知改为「凭证变化时提示」+「每天首次打开签到页提示一次」，
@@ -34,14 +48,18 @@
  *    · notify_when_signed 默认改为「开」——当天已签到时也推送通知；
  *      脚本侧同步改为「未显式传 false 即通知」，避免手动挂载时静默。
  *
- *  实测结论（2026-10-11 基于真实 HAR 逆向 + 在线逐条验证）：
- *    · 凭证只需两个参数：udid + accountId
- *      —— secret / cityId / s 均可省略；只给 udid 会拿到「匿名」数据
- *         （signRewards[0].status = unsigned），必须带 accountId 才能识别本人
+ *  实测结论（2026-10-11 初判 + 2026-10-12 修正，均在线逐条验证）：
+ *    · 读接口 config：只需 udid + accountId
+ *    · 写接口 signin：额外**必须**带 secret + s
+ *        - 只给 udid + accountId        → 0002 非法请求
+ *        - 补上 secret（缺 s）          → 400 Missing Request Parameter: s
+ *        - 补上 secret + s（s 随便填）  → 00 签到成功 ／ 1002 今日已签到
+ *      ⚠️ 原先把 0002 当成「凭证伪造」，是错的 —— 0002 的真实含义是「缺 secret」。
+ *    · H5 页面里 sdkCall("crypto") 算的 signature、以及 nonce/h5TimeStamp，
+ *      服务端**并不校验**（那套只走 App 原生桥，网页里没有 JS 兜底，我们复现不了，
+ *      但也不需要复现）。
  *    · Cookie 完全不需要
- *    · 请求里的 sign / signature / nonce / h5TimeStamp 是装饰性的，服务端不校验
- *      （伪造或直接不带都返回 200）
- *    · 唯一硬性要求：请求头里必须存在 Referer（值不校验，缺失则返回 400）
+ *    · 唯一硬性请求头要求：必须存在 Referer（值不校验，缺失则返回 400）
  *
  *  设计原则：
  *    · 抓包钩子只读 URL、不碰 body（requires-body=false），用裸 $done() 原样放行
@@ -50,7 +68,7 @@
  *    · 任何异常一律不写坏数据、不误报成功
  ***************************************************************/
 
-const SCRIPT_VERSION = "R1.0.6";
+const SCRIPT_VERSION = "R1.0.7";
 const NAME = "车来了签到";
 const STORE_KEY = "chelaile_checkin_cred";
 const WARN_KEY = "chelaile_checkin_warn";
@@ -76,9 +94,12 @@ function readArg() {
   let a = $argument;
   if (typeof a === "string") { try { a = JSON.parse(a); } catch (_) { return {}; } }
   if (!a || typeof a !== "object") return {};
-  // 兼容位置数组写法 argument=[{udid},{accountId},...]
+  // Loon 的 argument=[{...}] 会解析成「只含一个对象的数组」，这时要按对象处理；
+  // 也要兼容真正的位置数组写法 argument=[{udid},{accountId},...]
   if (Array.isArray(a)) {
-    return { udid: a[0], accountId: a[1], notify_when_signed: a[2], notify_on_capture: a[3], debug: a[4] };
+    if (a.length === 1 && a[0] && typeof a[0] === "object" && !Array.isArray(a[0])) return a[0];
+    return { udid: a[0], accountId: a[1], secret: a[2], s: a[3],
+             notify_when_signed: a[4], notify_on_capture: a[5], debug: a[6] };
   }
   return a;
 }
@@ -133,7 +154,22 @@ function pickQuery(url) {
   });
   return out;
 }
+// 参数取值守卫：只接受字符串/数字，拿到对象一律当空（防止传参错位把 "[object Object]" 当凭证用）
+function argVal(v) {
+  if (v == null) return "";
+  if (typeof v === "object") return "";
+  const t = String(v).trim();
+  return /^\[object /i.test(t) ? "" : t;
+}
 function mask(v) { v = String(v || ""); return v.length > 8 ? v.slice(0, 6) + "***len=" + v.length : v; }
+// 日志/通知里出现的 URL 必须脱敏 —— 凭证就在 query 里，直接推通知等于把 secret 贴到锁屏上
+function maskUrl(u) {
+  return String(u || "").replace(/([?&])(udid|accountId|secret|s|token|signature)=([^&]*)/gi,
+    (m, sep, k, val) => sep + k + "=" + mask(decodeURIComponentSafe(val)));
+}
+function decodeURIComponentSafe(v) {
+  try { return decodeURIComponent(v); } catch (_) { return v; }
+}
 
 /* ------------------------------------------------------------------
  * 2. 入口
@@ -167,11 +203,11 @@ function onCapture() {
     let hit = false;
     try { hit = $persistentStore.read(HIT_KEY) === "1"; } catch (_) {}
     if (!hit) {
-      log("[钩子] 首次命中: " + url.slice(0, 200));
+      log("[钩子] 首次命中: " + maskUrl(url).slice(0, 200));
       try { $persistentStore.write("1", HIT_KEY); } catch (_) {}
-      notify(NAME, "✅ 钩子已触发", "已成功拦到车来了的请求，说明 MITM 工作正常。\n\n" + url.slice(0, 150));
+      notify(NAME, "✅ 钩子已触发", "已成功拦到车来了的请求，说明 MITM 工作正常。\n\n" + maskUrl(url).slice(0, 150));
     } else {
-      log("[钩子] 命中: " + url.slice(0, 200));
+      log("[钩子] 命中: " + maskUrl(url).slice(0, 200));
     }
   }
 
@@ -179,10 +215,14 @@ function onCapture() {
 
   if (q.udid && q.accountId) {
     const old = storeRead();
-    const changed = !old || old.udid !== q.udid || old.accountId !== q.accountId;
+    // secret 有时跟 accountId 在同一条 URL，有时要等下一次请求才带上 —— 合并保留
+    const secret = q.secret || (old && old.secret) || "";
+    const sVal = q.s || (old && old.s) || "";
+    const changed = !old || old.udid !== q.udid || old.accountId !== q.accountId
+      || (old.secret || "") !== secret || (old.s || "") !== sVal;
     if (changed) {
-      storeWrite({ udid: q.udid, accountId: q.accountId, updatedAt: Date.now() });
-      log(`已捕获凭证 udid=${mask(q.udid)} accountId=${q.accountId}`);
+      storeWrite({ udid: q.udid, accountId: q.accountId, secret, s: sVal, updatedAt: Date.now() });
+      log(`已捕获凭证 udid=${mask(q.udid)} accountId=${q.accountId} secret=${secret ? mask(secret) : "(本条URL未带)"}`);
     }
     if (WANT_CAPTURE_NOTIFY) {
       let last = "";
@@ -190,7 +230,7 @@ function onCapture() {
       const today = localDate();
       if (changed) {
         try { $persistentStore.write(today, NOTICE_KEY); } catch (_) {}
-        notify(NAME, "✅ 已获取签到凭证", `udid: ${mask(q.udid)}\naccountId: ${q.accountId}\n\n凭证已保存，之后每天自动签到，无需再操作。`);
+        notify(NAME, "✅ 已获取签到凭证", `udid: ${mask(q.udid)}\naccountId: ${q.accountId}\nsecret: ${secret ? "已捕获" : "本条 URL 未带，稍后自动补"}\n\n凭证已保存，之后每天自动签到，无需再操作。`);
       } else if (last !== today) {
         try { $persistentStore.write(today, NOTICE_KEY); } catch (_) {}
         notify(NAME, "✅ 凭证正常", `已成功拦到车来了的请求，凭证可用。\nudid: ${mask(q.udid)}\naccountId: ${q.accountId}\n\n（每天首次打开签到页提示一次，可在插件开关里关闭）`);
@@ -212,21 +252,34 @@ async function onCron() {
   // 凭证优先级：Argument 手填 > 抓包存储
   const saved = storeRead();
   const cred = {
-    udid: (arg.udid && String(arg.udid).trim()) || (saved && saved.udid) || "",
-    accountId: (arg.accountId && String(arg.accountId).trim()) || (saved && saved.accountId) || "",
+    udid: argVal(arg.udid) || (saved && saved.udid) || "",
+    accountId: argVal(arg.accountId) || (saved && saved.accountId) || "",
+    secret: argVal(arg.secret) || (saved && saved.secret) || "",
+    // s 只要非空即可（实测填 1 也能签到成功），所以给个默认值兜底
+    s: argVal(arg.s) || (saved && saved.s) || "1",
   };
   if (!cred.udid || !cred.accountId) {
     const msg = "缺少凭证。请先打开车来了 App → 进入「每日签到」页一次（脚本会自动抓取），"
-      + "或在插件 Argument 里手动填写 udid / accountId。";
+      + "或在插件 Argument 里手动填写 udid / accountId / secret。";
     log(msg);
     notify(NAME, "⚠️ 未配置凭证", msg);
     return done();
   }
-  log(`凭证来源: ${(arg.udid && String(arg.udid).trim()) ? "Argument" : "抓包存储"}  udid=${mask(cred.udid)} accountId=${cred.accountId}`);
+  // secret 是 signin 的硬性要求（少了必返回 0002 非法请求），单独提示
+  if (!cred.secret) {
+    const msg = "缺少 secret（签到接口必须带，少了会返回「0002 非法请求」）。"
+      + "请打开车来了 App →「每日签到」页面一次，脚本会自动抓取；"
+      + "或在插件 Argument 里手动填写 secret。";
+    log(msg);
+    notify(NAME, "⚠️ 缺少 secret", msg);
+    return done();
+  }
+  log(`凭证来源: ${argVal(arg.udid) ? "Argument" : "抓包存储"}  `
+    + `udid=${mask(cred.udid)} accountId=${cred.accountId} secret=${mask(cred.secret)}`);
 
   // ---- 4.1 查配置，判断今天是否已签 ----
   const cfgR = await httpGetJSON(API + "config?" + qs(cred));
-  if (DEBUG) log("config 原始响应: " + String(cfgR._raw || "").slice(0, 400));
+  if (DEBUG) log("config 原始响应: " + maskUrl(String(cfgR._raw || "")).slice(0, 400));
   const cfg = cfgR.json;
   if (!cfg || !cfg.data || !Array.isArray(cfg.data.signRewards)) {
     const why = cfgR._err ? cfgR._err : (cfg && cfg.errmsg) ? cfg.errmsg : `HTTP ${cfgR._http}`;
@@ -251,7 +304,7 @@ async function onCron() {
 
   // ---- 4.2 执行签到 ----
   const sigR = await httpGetJSON(API + "signin?" + qs(cred));
-  if (DEBUG) log("signin 原始响应: " + String(sigR._raw || "").slice(0, 400));
+  if (DEBUG) log("signin 原始响应: " + maskUrl(String(sigR._raw || "")).slice(0, 400));
   const sig = sigR.json;
   const status = sig && sig.status;
   const errmsg = (sig && sig.errmsg) || "";
@@ -264,6 +317,11 @@ async function onCron() {
   } else if (status === "1002" || /已签到/.test(errmsg)) {
     log("服务端提示今日已签到");
     notify(NAME, "今日已签到", errmsg || "已在其他地方完成签到");
+  } else if (status === "0002") {
+    const msg = "服务端返回「0002 非法请求」—— 按实测，这通常意味着 secret 不对或已过期。"
+      + "请打开车来了 App →「每日签到」页一次让脚本重新抓取凭证。";
+    log("签到失败: 0002 非法请求（secret 缺失或失效）");
+    notify(NAME, "❌ 签到失败", msg);
   } else {
     const why = sigR._err ? sigR._err : (errmsg || `status=${status} HTTP ${sigR._http}`);
     log("签到失败: " + why);
