@@ -1,8 +1,15 @@
 /***************************************************************
  *  车来了 · 每日签到（7天连续签）  |  Loon http-request + cron 脚本
  *  ------------------------------------------------------------
- *  SCRIPT_VERSION : R1.0.7
+ *  SCRIPT_VERSION : R1.0.8
  *  适配           : 车来了 iOS App 7.6.3（web.chelaile.net.cn/api/op-activity-api/daily-act/*）
+ *
+ *  R1.0.8 变更：
+ *    · ★ 修「签到成功但 Loon 不弹通知」：notify() 原来把 $notify（Quantumult X 的 API）
+ *      放在 $notification.post（Loon/Surge 的 API）前面，一旦宿主存在 $notify 就会短路掉
+ *      真正可用的接口 → 通知静默消失。现在优先 $notification.post，全程 try/catch，
+ *      并把「已发送通知 / 无可用接口 / 发送失败」写进运行日志；cron 启动时打印通知环境。
+ *    · 默认执行时间改为每天 00:01，另加一条 08:05 静默补签兜底（见插件）
  *
  *  R1.0.7 变更（★ 修「签到一直失败」）：
  *    · 实测发现 signin 与 config 的鉴权**不一样**：
@@ -12,6 +19,11 @@
  *      现在抓包钩子会一并收下 secret / s，cron 三个接口都带上。
  *    · s 只要非空即可（实测填 "1" 也能签到成功），默认 "1"。
  *    · 0002 现在会提示「secret 缺失，请重新打开一次每日签到页」而不是笼统报错。
+ *    · ★ 修通知静默消失：notify() 原来把 $notify（Quantumult X 的 API）放在
+ *      $notification.post（Loon/Surge 的 API）前面判断，一旦宿主存在 $notify 就会
+ *      短路掉真正可用的接口。现在优先用 $notification.post，并全程 try/catch +
+ *      把「已发送通知 / 无可用接口 / 发送失败」写进运行日志。
+ *    · cron 启动时打印通知环境（$notification / $notify 的类型），一眼可判。
  *    · ★ 修插件传参与脚本解析不一致：插件写的是 argument=[{"udid":…,"accountId":…}]，
  *      而脚本原来按「位置数组」解析，会把整个对象当成 udid（"[object Object]"）。
  *      现在两种形态都兼容，并加了值类型守卫。
@@ -68,7 +80,7 @@
  *    · 任何异常一律不写坏数据、不误报成功
  ***************************************************************/
 
-const SCRIPT_VERSION = "R1.0.7";
+const SCRIPT_VERSION = "R1.0.8";
 const NAME = "车来了签到";
 const STORE_KEY = "chelaile_checkin_cred";
 const WARN_KEY = "chelaile_checkin_warn";
@@ -85,9 +97,32 @@ const STATIC_EXT = /\.(?:css|js|mjs|json|map|png|jpe?g|gif|webp|avif|svg|ico|bmp
  * ------------------------------------------------------------------ */
 function done(payload) { if (typeof $done !== "undefined") $done(payload || {}); }
 function log(s) { console.log(`[${NAME}] ${s}`); }
+// ⚠️ 顺序很重要：Loon / Surge 的标准 API 是 $notification.post，
+// 而 $notify 是 Quantumult X 的写法。原来把 $notify 放在前面，
+// 一旦宿主里存在 $notify（哪怕只是兼容空壳），就会短路掉真正能用的接口 → 通知静默消失。
+function notifyEnv() {
+  let a = "无", b = "无";
+  try { a = typeof $notification + (($notification && typeof $notification.post === "function") ? ".post✅" : ".post❌"); } catch (_) {}
+  try { b = typeof $notify; } catch (_) {}
+  return `$notification=${a} $notify=${b}`;
+}
 function notify(title, subtitle, body) {
-  if (typeof $notify !== "undefined") return $notify(title, subtitle, body);                  // Surge
-  if (typeof $notification !== "undefined") return $notification.post(title, subtitle, body); // Loon / QX
+  try {
+    if (typeof $notification !== "undefined" && $notification
+        && typeof $notification.post === "function") {
+      $notification.post(title, subtitle, body);
+      log(`已发送通知: ${subtitle}`);
+      return;
+    }
+    if (typeof $notify === "function") {                 // Quantumult X
+      $notify(title, subtitle, body);
+      log(`已发送通知(QX): ${subtitle}`);
+      return;
+    }
+    log(`⚠️ 无可用通知接口（${notifyEnv()}），仅写日志: ${subtitle}`);
+  } catch (e) {
+    log(`⚠️ 通知发送失败: ${(e && e.message ? e.message : e)}（${notifyEnv()}）`);
+  }
 }
 function readArg() {
   if (typeof $argument === "undefined") return {};
@@ -247,7 +282,7 @@ async function onCron() {
   const arg = readArg();
   const DEBUG = String(arg.debug) === "true";
   const WANT_SIGNED_NOTIFY = String(arg.notify_when_signed) !== "false";   // 默认开启，显式传 false 才关闭
-  log(`脚本版本 ${SCRIPT_VERSION}`);
+  log(`脚本版本 ${SCRIPT_VERSION}  通知环境: ${notifyEnv()}`);
 
   // 凭证优先级：Argument 手填 > 抓包存储
   const saved = storeRead();
