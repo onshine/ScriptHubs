@@ -1,5 +1,5 @@
 #!name=车来了每日签到
-#!desc=车来了 App「7天连续签」自动签到并推送奖励结果。默认每天 00:01 执行，另有一条 08:05 的静默补签兜底。R1.0.8 修好了「签到成功但 Loon 不弹通知」的 API 调用顺序问题。<b>首次需先打开车来了 →「每日签到」页一次</b>，脚本会自动抓取设备凭证（udid / accountId / secret），抓到时会有通知提示；之后每天定时自动签到。若一直抓不到凭证，可在 Argument 里手动填写。<b>更新后请删除旧插件重新添加</b>，否则 Loon 可能仍在运行缓存里的旧脚本。
+#!desc=车来了 App「7天连续签」自动签到并推送奖励结果。两条定时任务的时间都可在下方 Argument 里自定义：主任务默认 00:01，补签兜底默认 08:05（已签则静默跳过、不打扰）。<b>首次需先打开车来了 →「每日签到」页一次</b>，脚本会自动抓取设备凭证（udid / accountId / secret），抓到时会有通知提示；之后每天定时自动签到。若一直抓不到凭证，可在 Argument 里手动填写。<b>更新后请删除旧插件重新添加</b>，否则 Loon 可能仍在运行缓存里的旧脚本。
 #!author=Minis
 #!homepage=https://github.com/onshine/ScriptHubs/tree/main/chelaile-checkin
 #!icon=https://raw.githubusercontent.com/luestr/IconResource/main/App_icon/120px/Chelaile.png
@@ -8,6 +8,7 @@
 
 [Argument]
 cron = 1 0 * * *
+cron_backup = 5 8 * * *
 udid =
 accountId =
 secret =
@@ -19,7 +20,7 @@ debug = switch,false,tag=调试日志,desc=输出接口原始响应与钩子命�
 [Script]
 http-request ^https:\/\/web\.chelaile\.net\.cn\/ script-path=https://raw.githubusercontent.com/onshine/ScriptHubs/main/chelaile-checkin/chelaile-checkin.js, requires-body=false, timeout=30, tag=车来了抓凭证
 cron {cron} script-path=https://raw.githubusercontent.com/onshine/ScriptHubs/main/chelaile-checkin/chelaile-checkin.js, timeout=300, argument=[{"udid":"{udid}","accountId":"{accountId}","secret":"{secret}","s":"{s}","notify_when_signed":"{notify_when_signed}","debug":"{debug}"}], tag=车来了签到
-cron "5 8 * * *" script-path=https://raw.githubusercontent.com/onshine/ScriptHubs/main/chelaile-checkin/chelaile-checkin.js, timeout=300, argument=[{"udid":"{udid}","accountId":"{accountId}","secret":"{secret}","s":"{s}","notify_when_signed":"false","debug":"{debug}"}], tag=车来了补签兜底
+cron {cron_backup} script-path=https://raw.githubusercontent.com/onshine/ScriptHubs/main/chelaile-checkin/chelaile-checkin.js, timeout=300, argument=[{"udid":"{udid}","accountId":"{accountId}","secret":"{secret}","s":"{s}","notify_when_signed":"false","debug":"{debug}"}], tag=车来了补签兜底
 
 [MitM]
 hostname = %APPEND% web.chelaile.net.cn
