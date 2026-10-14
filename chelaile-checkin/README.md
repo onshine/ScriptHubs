@@ -82,6 +82,13 @@ https://raw.githubusercontent.com/onshine/ScriptHubs/main/chelaile-checkin/CheLa
 
 ## 四、抓不到凭证怎么办（常见问题）
 
+> **7.6.6 起请注意**：凭证不再保证出现在同一条 URL 里。脚本已改为**合并式采集** ——
+> 只要 App 的任何一条请求带了 `udid` / `accountId` / `secret` 中的任意几个，
+> 就会和已存的合并，凑齐三件套后落盘并通知。所以**正常打开车来了用一会儿**就够了，
+> 不必特意去点「每日签到」页。
+>
+> 如果连「✅ 钩子已触发」都没有，说明 `http-request` 钩子完全没命中 —— 检查 MitM 开关与证书信任。
+
 抓凭证靠 `http-request` 钩子，**前提是 Loon 能解开车来了的 HTTPS**。
 
 **先做一次二分判断**（`debug` 打开时有效，默认已开）：
@@ -229,6 +236,7 @@ Loon 的生命周期由 iOS 管，**做不到 100%**。真正稳的方案：
 
 | 版本 | 说明 |
 |---|---|
+| R1.0.10 | ★ **修「车来了 7.6.6 起抓凭证通知没了」**。7.6.6 改了签到页的取凭证方式：`accountId` / `secret` 常常**不再进 URL**（改由 App 原生桥 `userLogIn` 提供），签到 H5 页可能**只带 `udid`** —— 老钩子挂在 `web.chelaile.net.cn` 且要求「一条 URL 里同时有 udid + accountId」，于是收不全、不落盘、也不通知。<br>改法：① 钩子匹配范围放宽到**车来了全部域名 + 它的 HTTPDNS 直连 IP**（`api` / `cdn.api` / `*.chelaileapp.cn` / `124.70.194.16` / `124.71.153.172`）；② 改为**合并式采集** —— 本条 URL 有什么就收什么，缺的用已存的补，三件套凑齐才落盘；③ `[MitM]` 相应补上这些域名。<br>另修一个真 bug：通知分支里引用了已改名的变量（`changed`），会抛 `ReferenceError` 被外层 catch 吞掉 —— **这本身就表现为「脚本没反应、不弹通知」**。 |
 | R1.0.9 | ★★ **修「参数在 Loon 设置页里根本改不了」**。根因：`[Argument]` 里写的是**裸值**（`cron = 1 0 * * *`、`udid =`），按官方规范这**不构成可编辑控件**，Loon 不会为它生成输入框 → 用户看得到却改不了。已全部改成官方写法 `参数名 = input,"默认值",tag=标题,desc=说明`（`cron` / `cron_backup` / `udid` / `accountId` / `secret` / `s` 六项现在都能在设置页直接改）。<br>⚠️ 同时作废一条**错误的历史结论**：此前记录的「`input,"…"` 会导致整个 `[Script]` 段失效」是错的 —— `input,"…"` 正是官方写法（官方示例、Sub-Store、WhosTV 都在用）；当时真正的元凶是同期 `raw.githubusercontent.com` 在发旧版，两个问题撞在一起被错误归因，代价是把「可自定义」做废了。 |
 | R1.0.8 | ★ **修「签到成功但 Loon 不弹通知」**：`notify()` 原来把 `$notify`（**Quantumult X** 的 API）放在 `$notification.post`（**Loon/Surge** 的 API）前面判断，一旦宿主里存在 `$notify`（哪怕只是兼容空壳）就会**短路掉真正可用的接口** → 通知静默消失。现在优先用 `$notification.post`，全程 try/catch，并把「已发送通知 / 无可用接口 / 发送失败」写进运行日志；cron 启动时会打印通知环境（`$notification` / `$notify` 的类型），一眼可判。<br>默认执行时间改为**每天 00:01**；新增 08:05 补签兜底（00:01 设备深度待机易被 iOS 挂起；已签时完全静默）。<br>★ **两条定时任务的时间都走 Argument**（`cron` / `cron_backup`），插件里没有任何写死的 cron —— 上一版兜底那行把 `5 8 * * *` 写死了，已修正。<br>⚠️ 同日查证：`cron {cron}` 无引号 + Argument 自定义的写法**是正确的**（与 Sub-Store 官方插件完全一致），问题不在语法。 |
 | R1.0.7 | ★ **修「签到一直失败、0002 非法请求」**。根因：`signin` 与 `config` 鉴权不同 —— 签到**必须**带 `secret` 和 `s`，只带 `udid`+`accountId` 一律 `0002`。抓包钩子现在一并收下 `secret`/`s`，cron 三个接口都带上；`0002` 会明确提示「secret 缺失」而非笼统报错。**同时修掉插件传参与脚本解析不一致**：插件写的是 `argument=[{"udid":…,"accountId":…}]`，脚本原来按位置数组解析，会把整个对象当成 `udid`（`[object Object]`）—— 现在两种形态都兼容并加值类型守卫。**安全加固**：日志与通知里的 URL 一律脱敏（原来「首次命中」会把带 `secret` 的完整 URL 推成通知，锁屏可见），`debug` 默认改为关。 |

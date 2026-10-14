@@ -18,9 +18,9 @@ notify_when_signed = switch,true,tag=已签到也通知,desc=当天已签到时�
 debug = switch,false,tag=调试日志,desc=输出接口原始响应与命中记录（已自动脱敏）
 
 [Script]
-http-request ^https:\/\/web\.chelaile\.net\.cn\/ script-path=https://raw.githubusercontent.com/onshine/ScriptHubs/main/chelaile-checkin/chelaile-checkin.js, requires-body=false, timeout=30, tag=车来了抓凭证
+http-request ^https?:\/\/(?:[a-z0-9-]+\.)*(?:chelaile\.net\.cn|chelaileapp\.cn)\/|^https?:\/\/124\.(?:70\.194\.16|71\.153\.172)\/ script-path=https://raw.githubusercontent.com/onshine/ScriptHubs/main/chelaile-checkin/chelaile-checkin.js, requires-body=false, timeout=30, tag=车来了抓凭证
 cron {cron} script-path=https://raw.githubusercontent.com/onshine/ScriptHubs/main/chelaile-checkin/chelaile-checkin.js, timeout=300, argument=[{"udid":"{udid}","accountId":"{accountId}","secret":"{secret}","s":"{s}","notify_when_signed":"{notify_when_signed}","debug":"{debug}"}], tag=车来了签到
 cron {cron_backup} script-path=https://raw.githubusercontent.com/onshine/ScriptHubs/main/chelaile-checkin/chelaile-checkin.js, timeout=300, argument=[{"udid":"{udid}","accountId":"{accountId}","secret":"{secret}","s":"{s}","notify_when_signed":"false","debug":"{debug}"}], tag=车来了补签兜底
 
 [MitM]
-hostname = %APPEND% web.chelaile.net.cn
+hostname = %APPEND% web.chelaile.net.cn, api.chelaile.net.cn, cdn.api.chelaile.net.cn, cdn.api.chelaileapp.cn, cdn.web.chelaile.net.cn

@@ -1,8 +1,17 @@
 /***************************************************************
  *  车来了 · 每日签到（7天连续签）  |  Loon http-request + cron 脚本
  *  ------------------------------------------------------------
- *  SCRIPT_VERSION : R1.0.8
- *  适配           : 车来了 iOS App 7.6.3（web.chelaile.net.cn/api/op-activity-api/daily-act/*）
+ *  SCRIPT_VERSION : R1.0.10
+ *  适配           : 车来了 iOS App 7.6.6（web.chelaile.net.cn/api/op-activity-api/daily-act/*）
+ *
+ *  R1.0.10 变更（★ 修「7.6.6 起抓凭证通知没了」）：
+ *    · 抓包钩子匹配范围从「只挂 web.chelaile.net.cn」放宽到**车来了全部域名
+ *      + 它的 HTTPDNS 直连 IP**（api / cdn.api / *.chelaileapp.cn / 124.70.194.16 / 124.71.153.172）。
+ *      原因：7.6.6 起 accountId / secret 常常不再进 URL（改由 App 原生桥 userLogIn 提供），
+ *      签到 H5 页可能只带 udid → 老钩子收不全 → 不落盘、也不发通知。
+ *    · 改为**合并式采集**：本条 URL 有什么就收什么，缺的用已存的补，三件套凑齐才落盘。
+ *    · 修一个真 bug：通知块里引用了已改名的变量（changed），会抛 ReferenceError 被外层
+ *      catch 吞掉 —— 这本身就表现为「脚本没反应、不弹通知」。
  *
  *  R1.0.8 变更：
  *    · ★ 修「签到成功但 Loon 不弹通知」：notify() 原来把 $notify（Quantumult X 的 API）
@@ -80,7 +89,7 @@
  *    · 任何异常一律不写坏数据、不误报成功
  ***************************************************************/
 
-const SCRIPT_VERSION = "R1.0.8";
+const SCRIPT_VERSION = "R1.0.10";
 const NAME = "车来了签到";
 const STORE_KEY = "chelaile_checkin_cred";
 const WARN_KEY = "chelaile_checkin_warn";
@@ -227,49 +236,67 @@ function decodeURIComponentSafe(v) {
 function onCapture() {
   const url = ($request && $request.url) || "";
   if (STATIC_EXT.test(url)) return done({});          // 二重保险：静态资源一律放行
-  if (!/web\.chelaile\.net\.cn\//.test(url)) return done({});
+  // 车来了的所有域名 + 它的 HTTPDNS 直连 IP（HTTP 请求不需要 MITM 也能看见 URL）
+  // 注意：chelaile.net.cn 与 chelaileapp.cn 结构不同，必须显式列举，不能用 chelaile(app)?\.cn 糊
+  if (!/(^|\/\/)([a-z0-9-]+\.)*(chelaile\.net\.cn|chelaileapp\.cn)\b|^https?:\/\/124\.(?:70\.194\.16|71\.153\.172)\b/i.test(url)) {
+    return done({});
+  }
 
   const arg = readArg();
   const WANT_CAPTURE_NOTIFY = String(arg.notify_on_capture) !== "false";   // 默认开
-  const DEBUG = String(arg.debug) === "true";
 
   // 【诊断】首次命中时提示一次：用来区分「MITM 没生效」和「抓到了但解析不出凭证」
   {
     let hit = false;
     try { hit = $persistentStore.read(HIT_KEY) === "1"; } catch (_) {}
+    const masked = maskUrl(url).slice(0, 200);
     if (!hit) {
-      log("[钩子] 首次命中: " + maskUrl(url).slice(0, 200));
+      log("[钩子] 首次命中: " + masked);
       try { $persistentStore.write("1", HIT_KEY); } catch (_) {}
-      notify(NAME, "✅ 钩子已触发", "已成功拦到车来了的请求，说明 MITM 工作正常。\n\n" + maskUrl(url).slice(0, 150));
+      notify(NAME, "\u2705 钩子已触发", "已成功拦到车来了的请求，说明 MITM 工作正常。\n\n" + masked.slice(0, 150));
     } else {
-      log("[钩子] 命中: " + maskUrl(url).slice(0, 200));
+      log("[钩子] 命中: " + masked);
     }
   }
 
+  // \u2605 合并式采集：App 7.6.6 起 udid / accountId / secret 常常分散在不同请求里
+  //   （签到 H5 页可能只带 udid，accountId + secret 改由原生桥 userLogIn 提供、不再进 URL）。
+  //   所以「本条 URL 有什么就收什么」，缺的用已存的补，三件套凑齐才落盘。
   const q = pickQuery(url);
+  const old = storeRead() || {};
+  const next = {
+    udid: q.udid || old.udid || "",
+    accountId: q.accountId || old.accountId || "",
+    secret: q.secret || old.secret || "",
+    s: q.s || old.s || "",
+  };
+  const complete = !!(next.udid && next.accountId && next.secret);
+  if (!complete) {
+    const lack = [!next.udid ? "udid" : "", !next.accountId ? "accountId" : "", !next.secret ? "secret" : ""]
+      .filter(Boolean).join(" ");
+    log(`[钩子] 片段（本条 URL 未带: ${lack}）`);
+    return done({});
+  }
 
-  if (q.udid && q.accountId) {
-    const old = storeRead();
-    // secret 有时跟 accountId 在同一条 URL，有时要等下一次请求才带上 —— 合并保留
-    const secret = q.secret || (old && old.secret) || "";
-    const sVal = q.s || (old && old.s) || "";
-    const changed = !old || old.udid !== q.udid || old.accountId !== q.accountId
-      || (old.secret || "") !== secret || (old.s || "") !== sVal;
+  const changed = !old.udid || old.udid !== next.udid || old.accountId !== next.accountId
+    || (old.secret || "") !== next.secret || (old.s || "") !== next.s;
+  if (changed) {
+    storeWrite(Object.assign({}, next, { updatedAt: Date.now() }));
+    log(`已捕获凭证 udid=${mask(next.udid)} accountId=${next.accountId} secret=${mask(next.secret)}`);
+  }
+
+  if (WANT_CAPTURE_NOTIFY) {
+    let last = "";
+    try { last = $persistentStore.read(NOTICE_KEY) || ""; } catch (_) {}
+    const today = localDate();
     if (changed) {
-      storeWrite({ udid: q.udid, accountId: q.accountId, secret, s: sVal, updatedAt: Date.now() });
-      log(`已捕获凭证 udid=${mask(q.udid)} accountId=${q.accountId} secret=${secret ? mask(secret) : "(本条URL未带)"}`);
-    }
-    if (WANT_CAPTURE_NOTIFY) {
-      let last = "";
-      try { last = $persistentStore.read(NOTICE_KEY) || ""; } catch (_) {}
-      const today = localDate();
-      if (changed) {
-        try { $persistentStore.write(today, NOTICE_KEY); } catch (_) {}
-        notify(NAME, "✅ 已获取签到凭证", `udid: ${mask(q.udid)}\naccountId: ${q.accountId}\nsecret: ${secret ? "已捕获" : "本条 URL 未带，稍后自动补"}\n\n凭证已保存，之后每天自动签到，无需再操作。`);
-      } else if (last !== today) {
-        try { $persistentStore.write(today, NOTICE_KEY); } catch (_) {}
-        notify(NAME, "✅ 凭证正常", `已成功拦到车来了的请求，凭证可用。\nudid: ${mask(q.udid)}\naccountId: ${q.accountId}\n\n（每天首次打开签到页提示一次，可在插件开关里关闭）`);
-      }
+      try { $persistentStore.write(today, NOTICE_KEY); } catch (_) {}
+      notify(NAME, "\u2705 已获取签到凭证",
+        `udid: ${mask(next.udid)}\naccountId: ${next.accountId}\nsecret: 已捕获\n\n凭证已保存，之后每天自动签到，无需再操作。`);
+    } else if (last !== today) {
+      try { $persistentStore.write(today, NOTICE_KEY); } catch (_) {}
+      notify(NAME, "\u2705 凭证正常",
+        `已成功拦到车来了的请求，凭证可用。\nudid: ${mask(next.udid)}\naccountId: ${next.accountId}\n\n（每天首次打开车来了提示一次，可在插件开关里关闭）`);
     }
   }
   return done({});
