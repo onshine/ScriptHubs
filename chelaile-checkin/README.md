@@ -77,7 +77,8 @@ https://raw.githubusercontent.com/onshine/ScriptHubs/main/chelaile-checkin/CheLa
 | `secret` | 空 | **一般留空**，用抓包自动捕获的值（32 位十六进制）。签到接口必须带，**少了必返回 `0002 非法请求`**；抓不到时可手动粘贴 |
 | `s` | `1` | 签到接口要求非空即可，默认 `1`，一般不用改 |
 | `notify_on_capture` | **开** | 抓到凭证时推送一次通知（同一凭证只提示一次） |
-| `notify_when_signed` | **开** | 当天已签到时也推送通知；关掉后只在签到有动作或出错时通知 |
+| `notify_when_signed` | **开** | 当天已签到时也推送通知；关掉后只在签到有动作或出错时通知（主任务用） |
+| `backup_silent` | **开** | 兜底那趟在当天已签时**静默**，避免每天收到两条通知 |
 | `debug` | 关 | 输出接口原始响应，排查时打开 |
 
 ## 四、抓不到凭证怎么办（常见问题）
@@ -151,6 +152,38 @@ https://raw.githubusercontent.com/onshine/ScriptHubs/main/chelaile-checkin/CheLa
 **Q：会不会误签 / 重复签？**
 不会。脚本先用 `config` 判断 `signRewards[].signDate == 今天`，
 已签就直接跳过，连 `signin` 都不发。
+
+## ★★ 为什么 cron 一直不执行 —— 旧语法的 `{cron}` 在 cron 位置不被识别
+
+**症状**：定时任务从来不跑，手动点却每次都成功；把时间改成「每 5 分钟」也依然没动静。
+
+**根因**：R1.0.10 及更早用的是**旧语法**：
+
+```ini
+cron {cron} script-path=…          ← 旧式占位符 {…}
+```
+
+而官方文档（`docs/Plugin`、`docs/Script/script_v2`）里，**插件作用域的「动态 Cron」只有一种写法**：
+
+```
+cron ${cronExpression} then script("task.js", {…}) with …
+```
+
+依据有三条：
+
+1. 官方**能力对照表**明确列出「动态 Cron」**仅在插件作用域可用**；
+   而该表的「新旧语法」章节里，**Cron 的旧语法示例给的是字面量**（`cron "0 8 * * *" script-path=…`），
+   新语法才是 `${…}` 参数化；
+2. Loon 会**把旧语法自动转换成新语法**（可从那行 REQUEST 脚本的 `Match Condition`
+   被显示成 `if ${url} ~= /…/i` 看出），转换时 `{cron}` 不会被当作参数；
+3. `docs/Plugin` 明写：**「Cron 表达式无效时，对应脚本不会执行」** —— 于是该条 Script 被静默跳过。
+
+> 这也解释了为什么**改参数值没用**：坏的是占位符，不是值。你把 `cron` 改成「每 5 分钟」，
+> 行里的 `{cron}` 依然解析不出来，照样不执行。
+
+**R1.0.11 修法**：整份改用官方 v2 语法，`cron ${cron}` + `then script(…)` + `with …`。
+
+---
 
 ## ★ 定时任务（cron）不自动跑怎么办
 
@@ -236,6 +269,7 @@ Loon 的生命周期由 iOS 管，**做不到 100%**。真正稳的方案：
 
 | 版本 | 说明 |
 |---|---|
+| R1.0.11 | ★★ **修「cron 从来不执行」**。根因：旧语法的 `cron {cron}` 里，**`{…}` 占位符在 cron 位置不被识别为参数**（官方只在 v2 语法里支持插件动态 Cron），表达式退化成字面量 → 官方语义「Cron 表达式无效时对应脚本不会执行」→ **该条 Script 被静默跳过**。这也解释了为什么改参数值没用（坏的是占位符）。整份改用官方 v2 语法：`request if ${url} ~= /…/i then script(…) with …` / `cron ${cron} then script(…, {…}) with …`。新增 `backup_silent` 开关（兜底那趟在当天已签时静默）。 |
 | R1.0.10 | ★ **修「车来了 7.6.6 起抓凭证通知没了」**。7.6.6 改了签到页的取凭证方式：`accountId` / `secret` 常常**不再进 URL**（改由 App 原生桥 `userLogIn` 提供），签到 H5 页可能**只带 `udid`** —— 老钩子挂在 `web.chelaile.net.cn` 且要求「一条 URL 里同时有 udid + accountId」，于是收不全、不落盘、也不通知。<br>改法：① 钩子匹配范围放宽到**车来了全部域名 + 它的 HTTPDNS 直连 IP**（`api` / `cdn.api` / `*.chelaileapp.cn` / `124.70.194.16` / `124.71.153.172`）；② 改为**合并式采集** —— 本条 URL 有什么就收什么，缺的用已存的补，三件套凑齐才落盘；③ `[MitM]` 相应补上这些域名。<br>另修一个真 bug：通知分支里引用了已改名的变量（`changed`），会抛 `ReferenceError` 被外层 catch 吞掉 —— **这本身就表现为「脚本没反应、不弹通知」**。 |
 | R1.0.9 | ★★ **修「参数在 Loon 设置页里根本改不了」**。根因：`[Argument]` 里写的是**裸值**（`cron = 1 0 * * *`、`udid =`），按官方规范这**不构成可编辑控件**，Loon 不会为它生成输入框 → 用户看得到却改不了。已全部改成官方写法 `参数名 = input,"默认值",tag=标题,desc=说明`（`cron` / `cron_backup` / `udid` / `accountId` / `secret` / `s` 六项现在都能在设置页直接改）。<br>⚠️ 同时作废一条**错误的历史结论**：此前记录的「`input,"…"` 会导致整个 `[Script]` 段失效」是错的 —— `input,"…"` 正是官方写法（官方示例、Sub-Store、WhosTV 都在用）；当时真正的元凶是同期 `raw.githubusercontent.com` 在发旧版，两个问题撞在一起被错误归因，代价是把「可自定义」做废了。 |
 | R1.0.8 | ★ **修「签到成功但 Loon 不弹通知」**：`notify()` 原来把 `$notify`（**Quantumult X** 的 API）放在 `$notification.post`（**Loon/Surge** 的 API）前面判断，一旦宿主里存在 `$notify`（哪怕只是兼容空壳）就会**短路掉真正可用的接口** → 通知静默消失。现在优先用 `$notification.post`，全程 try/catch，并把「已发送通知 / 无可用接口 / 发送失败」写进运行日志；cron 启动时会打印通知环境（`$notification` / `$notify` 的类型），一眼可判。<br>默认执行时间改为**每天 00:01**；新增 08:05 补签兜底（00:01 设备深度待机易被 iOS 挂起；已签时完全静默）。<br>★ **两条定时任务的时间都走 Argument**（`cron` / `cron_backup`），插件里没有任何写死的 cron —— 上一版兜底那行把 `5 8 * * *` 写死了，已修正。<br>⚠️ 同日查证：`cron {cron}` 无引号 + Argument 自定义的写法**是正确的**（与 Sub-Store 官方插件完全一致），问题不在语法。 |

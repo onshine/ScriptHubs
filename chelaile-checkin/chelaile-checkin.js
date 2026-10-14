@@ -1,8 +1,17 @@
 /***************************************************************
  *  车来了 · 每日签到（7天连续签）  |  Loon http-request + cron 脚本
  *  ------------------------------------------------------------
- *  SCRIPT_VERSION : R1.0.10
+ *  SCRIPT_VERSION : R1.0.11
  *  适配           : 车来了 iOS App 7.6.6（web.chelaile.net.cn/api/op-activity-api/daily-act/*）
+ *
+ *  R1.0.11 变更（★ 修「cron 从来不执行」）：
+ *    · 插件改为官方 v2 Script 语法（Loon 3.5.1/983+），cron 用 ${cron} 而不是旧式 {cron}。
+ *      依据：官方「本地/远程/插件 能力对照表」里 **动态 Cron 只有插件作用域支持**，
+ *      且官方示例只给 `cron ${cronExpression} then script(...)` 这一种写法；
+ *      Plugin.md 明确「Cron 表达式无效时，对应脚本不会执行」。
+ *      旧语法 {cron} 在 cron 位置不被识别为参数 -> 表达式成了字面量 -> 无效 -> 静默不执行。
+ *      （这也解释了为什么把参数值改成「每 5 分钟」依然没用：坏的是占位符，不是值。）
+ *    · 新增 backup_silent：兜底那趟在当天已签时静默，避免每天两条通知。
  *
  *  R1.0.10 变更（★ 修「7.6.6 起抓凭证通知没了」）：
  *    · 抓包钩子匹配范围从「只挂 web.chelaile.net.cn」放宽到**车来了全部域名
@@ -93,7 +102,7 @@
  *    · 任何异常一律不写坏数据、不误报成功
  ***************************************************************/
 
-const SCRIPT_VERSION = "R1.0.10";
+const SCRIPT_VERSION = "R1.0.11";
 const NAME = "车来了签到";
 const STORE_KEY = "chelaile_checkin_cred";
 const WARN_KEY = "chelaile_checkin_warn";
@@ -147,7 +156,7 @@ function readArg() {
   if (Array.isArray(a)) {
     if (a.length === 1 && a[0] && typeof a[0] === "object" && !Array.isArray(a[0])) return a[0];
     return { udid: a[0], accountId: a[1], secret: a[2], s: a[3],
-             notify_when_signed: a[4], notify_on_capture: a[5], debug: a[6] };
+             notify_when_signed: a[4], notify_on_capture: a[5], backup_silent: a[6], debug: a[7] };
   }
   return a;
 }
@@ -312,7 +321,9 @@ function onCapture() {
 async function onCron() {
   const arg = readArg();
   const DEBUG = String(arg.debug) === "true";
-  const WANT_SIGNED_NOTIFY = String(arg.notify_when_signed) !== "false";   // 默认开启，显式传 false 才关闭
+  // 兜底那趟传 backup_silent：当天已签时静默（避免每天两条通知）
+  const BACKUP_SILENT = arg.backup_silent === true || String(arg.backup_silent) === "true";
+  const WANT_SIGNED_NOTIFY = !BACKUP_SILENT && String(arg.notify_when_signed) !== "false";
   log(`脚本版本 ${SCRIPT_VERSION}  通知环境: ${notifyEnv()}`);
 
   // 凭证优先级：Argument 手填 > 抓包存储
