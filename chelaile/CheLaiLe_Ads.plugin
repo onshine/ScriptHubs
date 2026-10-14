@@ -1,5 +1,5 @@
 #!name=车来了去广告
-#!desc=去掉「车来了」App 的开屏广告与应用内广告。R1.0.2：开屏广告由 yg84 广告 SDK 提供（adx 调度层 + ssp 素材下发），已用 [Rule] 整域断掉，规则在插件更新时立即生效、不像脚本会被缓存。应用内广告走清洗启动配置 appToggle/getStatus + 各业务接口。<b>装完请删掉旧插件重新添加</b>，否则 Loon 可能仍在跑缓存的旧脚本。
+#!desc=去掉「车来了」App 的开屏广告与应用内广告（含穿山甲/百度/yg84 等第三方广告 SDK）。R1.0.2：开屏广告由 yg84 广告 SDK 提供（adx 调度层 + ssp 素材下发），已用 [Rule] 整域断掉，规则在插件更新时立即生效、不像脚本会被缓存。应用内广告走清洗启动配置 appToggle/getStatus + 各业务接口。<b>装完请删掉旧插件重新添加</b>，否则 Loon 可能仍在跑缓存的旧脚本。
 #!author=Minis
 #!homepage=https://github.com/onshine/ScriptHubs/tree/main/chelaile
 #!icon=https://raw.githubusercontent.com/luestr/IconResource/main/App_icon/120px/Chelaile.png
@@ -16,16 +16,22 @@ block_httpdns = switch,true,tag=防 DNS 绕过,desc=移除配置里的 useHttpDn
 debug = switch,false,tag=调试日志,desc=在 Loon 运行日志里输出每个接口的处理结果，排查时打开
 
 [Rule]
-# 整域屏蔽：纯广告 / 埋点采集域名，不需要 MITM，最省事
+# 车来了自己的广告与埋点域名（不需要 MITM，最省事）
 DOMAIN, ad.chelaile.net.cn, REJECT
 DOMAIN, atrace.chelaile.net.cn, REJECT
 DOMAIN, logs.chelaile.net.cn, REJECT
-# yg84 广告 SDK 的埋点域名：实测一次冷启动打 61 次，纯上报无业务价值
-DOMAIN, ctrace.yg84.com, REJECT
-# ★ 开屏广告的来源：adx 是调度层、ssp 是素材下发层，整域断掉
-#   （用规则而不是脚本，因为规则在插件更新时立即生效，脚本会被 Loon 缓存）
-DOMAIN, adx.yg84.com, REJECT
-DOMAIN, ssp.yg84.com, REJECT
+# ★ 开屏广告的来源：yg84 广告 SDK。adx=调度层、ssp=素材下发层、ctrace=埋点，
+#   全在同一个根域下 —— 所以按根域整域断掉，将来它加子域也跑不掉
+#   （用规则而不是脚本：规则属插件本体，更新插件即生效，不受脚本缓存影响）
+DOMAIN-SUFFIX, yg84.com, REJECT
+# 第三方广告 SDK：穿山甲（字节跳动）
+DOMAIN-SUFFIX, pangolin-sdk-toutiao.com, REJECT
+DOMAIN-SUFFIX, pangolin-sdk-toutiao1.com, REJECT
+DOMAIN-SUFFIX, pangolin-sdk-toutiao-b.com, REJECT
+# 第三方广告 SDK：百度
+DOMAIN-SUFFIX, mobads.baidu.com, REJECT
+DOMAIN-SUFFIX, pos.baidu.com, REJECT
+DOMAIN-SUFFIX, sofire.baidu.com, REJECT
 # 开屏广告的曝光确认像素（请求里 bm= 与 SDK 的 boot_mark 一一对应）
 DOMAIN, m.magicacid.cn, REJECT
 
@@ -39,6 +45,8 @@ DOMAIN, m.magicacid.cn, REJECT
 ^https?:\/\/cdn\.[a-z0-9]+\.chelaileapp\.cn\/(?:api\/)?adpub reject
 # —— 详情页信息流落地页 & 首页固定广告位图片 ——
 ^https?:\/\/cdn\.web\.chelaile\.net\.cn\/info-flow\/index\.html reject
+# 会员页的推广图（7.6.6 新增，社区规则 CaoXiaoMann 发现的路径）
+^https?:\/\/[^\/]+\/feserver\/vip-page\/images\/ reject
 ^https?:\/\/image3\.chelaile\.net\.cn\/hw6u6LYY\.png reject-img
 
 [Script]
