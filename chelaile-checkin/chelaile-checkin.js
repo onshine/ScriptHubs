@@ -14,10 +14,13 @@
  *      catch 吞掉 —— 这本身就表现为「脚本没反应、不弹通知」。
  *
  *  R1.0.8 变更：
- *    · ★ 修「签到成功但 Loon 不弹通知」：notify() 原来把 $notify（Quantumult X 的 API）
- *      放在 $notification.post（Loon/Surge 的 API）前面，一旦宿主存在 $notify 就会短路掉
- *      真正可用的接口 → 通知静默消失。现在优先 $notification.post，全程 try/catch，
- *      并把「已发送通知 / 无可用接口 / 发送失败」写进运行日志；cron 启动时打印通知环境。
+ *    · 通知：优先 $notification.post（Loon/Surge/Stash 的标准 API），$notify 作 QX 兜底；
+ *      全程 try/catch，并把「已发送通知 / 无可用接口 / 发送失败」写进运行日志；
+ *      cron 启动时打印通知环境，一眼可判。
+ *    ⚠️ 更正一条写错的说明：曾记成「$notify（QX 的 API）会短路掉通知」——**那不对**。
+ *      Loon 官方「公开 API 清单」里**只有 $notification.post，没有 $notify**；
+ *      带 typeof 守卫时两种顺序都安全（守卫会跳过不存在的那个）。
+ *      真正要注意的是：**别写不带守卫的 $notify(...)**，在 Loon 上会抛 ReferenceError。
  *    · 默认执行时间改为每天 00:01，另加一条 08:05 静默补签兜底（见插件）
  *
  *  R1.0.7 变更（★ 修「签到一直失败」）：
@@ -28,10 +31,11 @@
  *      现在抓包钩子会一并收下 secret / s，cron 三个接口都带上。
  *    · s 只要非空即可（实测填 "1" 也能签到成功），默认 "1"。
  *    · 0002 现在会提示「secret 缺失，请重新打开一次每日签到页」而不是笼统报错。
- *    · ★ 修通知静默消失：notify() 原来把 $notify（Quantumult X 的 API）放在
- *      $notification.post（Loon/Surge 的 API）前面判断，一旦宿主存在 $notify 就会
- *      短路掉真正可用的接口。现在优先用 $notification.post，并全程 try/catch +
- *      把「已发送通知 / 无可用接口 / 发送失败」写进运行日志。
+ *    · 通知：优先 $notification.post，$notify 作 QX 兜底（全程 try/catch + 日志留痕）。
+ *    ⚠️ 更正一条写错的说明：曾记成「$notify（QX 的 API）会短路掉通知」——**那不对**。
+ *      Loon 官方「公开 API 清单」里**只有 $notification.post，没有 $notify**；
+ *      带 typeof 守卫时两种顺序都安全（守卫会跳过不存在的那个）。
+ *      真正要注意的是：**别写不带守卫的 $notify(...)**，在 Loon 上会抛 ReferenceError。
  *    · cron 启动时打印通知环境（$notification / $notify 的类型），一眼可判。
  *    · ★ 修插件传参与脚本解析不一致：插件写的是 argument=[{"udid":…,"accountId":…}]，
  *      而脚本原来按「位置数组」解析，会把整个对象当成 udid（"[object Object]"）。
