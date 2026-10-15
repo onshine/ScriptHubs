@@ -7,8 +7,8 @@
 #!loon_version=3.5.1(983)
 
 [Argument]
-cron = input,"1 0 * * *",tag=主任务时间,desc=每天主签到时间，格式：分 时 日 月 周
-cron_backup = input,"5 8 * * *",tag=补签兜底时间,desc=兜底补签时间，当天已签则静默跳过
+cron = input,"1 0 * * *",tag=主任务时间,desc=顺序是「分 时 日 月 周」分在前时在后。例：1 0 * * * 是每天00:01 ／ 30 8 * * * 是每天08:30 ／ 0 8,20 * * * 是每天08:00和20:00。⚠️逗号表示多个值（如 8,20 两个小时都跑）不是分隔时和分；写成 01,00 * * * * 会变成每小时跑两次
+cron_backup = input,"5 8 * * *",tag=补签兜底时间,desc=兜底补签时间（当天已签则静默跳过）。格式同上：5 8 * * * 是每天08:05。凌晨设备常被iOS挂起，这趟是保险
 udid = input,"",tag=udid,desc=一般留空，由抓包自动获取
 accountId = input,"",tag=accountId,desc=一般留空，由抓包自动获取
 secret = input,"",tag=secret,desc=一般留空，由抓包自动获取。签到接口必需，少了会报 0002

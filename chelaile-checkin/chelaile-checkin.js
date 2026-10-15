@@ -1,8 +1,14 @@
 /***************************************************************
  *  车来了 · 每日签到（7天连续签）  |  Loon http-request + cron 脚本
  *  ------------------------------------------------------------
- *  SCRIPT_VERSION : R1.0.11
+ *  SCRIPT_VERSION : R1.0.12
  *  适配           : 车来了 iOS App 7.6.6（web.chelaile.net.cn/api/op-activity-api/daily-act/*）
+ *
+ *  R1.0.12 变更：
+ *    · [Argument] 的 desc 里写进 cron 格式示例（顺序是「分 时 日 月 周」，分在前时在后；
+ *      并说明逗号是「多个值」不是分隔符）—— 填错顺序是最常见的手误。
+ *    · 新增 cron 频率自检：估算一天触发次数，超过 6 次就推一条提醒（每天只提醒一次）。
+ *      典型手误 `01,00 * * * *`（本意 00:01）实际是「每小时第 0 和第 1 分」= 一天 48 次。
  *
  *  R1.0.11 变更（★ 修「cron 从来不执行」）：
  *    · 插件改为官方 v2 Script 语法（Loon 3.5.1/983+），cron 用 ${cron} 而不是旧式 {cron}。
@@ -102,12 +108,13 @@
  *    · 任何异常一律不写坏数据、不误报成功
  ***************************************************************/
 
-const SCRIPT_VERSION = "R1.0.11";
+const SCRIPT_VERSION = "R1.0.12";
 const NAME = "车来了签到";
 const STORE_KEY = "chelaile_checkin_cred";
 const WARN_KEY = "chelaile_checkin_warn";
 const HIT_KEY = "chelaile_checkin_hit";
 const NOTICE_KEY = "chelaile_checkin_notice";
+const CRONWARN_KEY = "chelaile_checkin_cronwarn";
 const API = "https://web.chelaile.net.cn/api/op-activity-api/daily-act/";
 const REFERER = "https://web.chelaile.net.cn/app-relate/everyday-sign/index.html";
 const UA = "Mozilla/5.0 (iPhone; CPU iPhone OS 16_6_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 Chelaile/7.6.3";
@@ -326,6 +333,10 @@ async function onCron() {
   const WANT_SIGNED_NOTIFY = !BACKUP_SILENT && String(arg.notify_when_signed) !== "false";
   log(`脚本版本 ${SCRIPT_VERSION}  通知环境: ${notifyEnv()}`);
 
+  // 频率自检：cron 写错（最常见是把「分 时」顺序搞反、或用逗号当分隔符）会导致一天跑几十次。
+  // 脚本本身是幂等的（已签即跳过），但会刷通知、也不像正常用户行为，所以提醒一次。
+  checkCronSanity();
+
   // 凭证优先级：Argument 手填 > 抓包存储
   const saved = storeRead();
   const cred = {
@@ -405,4 +416,57 @@ async function onCron() {
     notify(NAME, "❌ 签到失败", String(why).slice(0, 120));
   }
   return done();
+}
+
+/* ------------------------------------------------------------------
+ * 5. cron 频率自检
+ *    最常见的手误：把「分 时」写反，或用逗号分隔时和分。
+ *    例：`01,00 * * * *` 本意「00:01」，实际是「每小时的第 0 和第 1 分」= 一天 48 次。
+ *    这里按「每天触发次数」估算，超过阈值就提醒（每天最多提醒一次，不刷屏）。
+ * ------------------------------------------------------------------ */
+function countsPerDay(field, total) {
+  // 返回该字段一天内命中的次数；field 为 cron 的某一段
+  const f = String(field || "*").trim();
+  if (f === "*") return total;
+  if (/^\*\/(\d+)$/.test(f)) {
+    const step = parseInt(f.split("/")[1], 10);
+    return step > 0 ? Math.ceil(total / step) : total;
+  }
+  // 逗号列举 / 单值 / 区间，粗略数一下
+  let n = 0;
+  for (const part of f.split(",")) {
+    if (!part) continue;
+    const m = part.match(/^(\d+)-(\d+)$/);
+    if (m) n += Math.max(0, parseInt(m[2], 10) - parseInt(m[1], 10) + 1);
+    else n += 1;
+  }
+  return n || total;
+}
+
+function checkCronSanity() {
+  let expr = "";
+  try { expr = String($script && $script.cron ? $script.cron : "").trim(); } catch (_) {}
+  if (!expr) return;                       // 宿主没暴露就跳过，不影响签到
+  const seg = expr.split(/\s+/);
+  let min, hour;
+  if (seg.length === 6) { min = seg[1]; hour = seg[2]; }      // 秒 分 时 日 月 周
+  else if (seg.length === 5) { min = seg[0]; hour = seg[1]; } // 分 时 日 月 周
+  else return;
+
+  const perDay = countsPerDay(min, 60) * countsPerDay(hour, 24);
+  if (perDay <= 6) return;                 // 一天 6 次以内属正常（含双次签到 + 兜底）
+
+  log(`⚠️ cron「${expr}」估算一天会触发约 ${perDay} 次，可能写错了`);
+  let last = "";
+  try { last = $persistentStore.read(CRONWARN_KEY) || ""; } catch (_) {}
+  const today = localDate();
+  if (last === today) return;              // 每天只提醒一次
+  try { $persistentStore.write(today, CRONWARN_KEY); } catch (_) {}
+  notify(NAME, "⚠️ 定时设置可能写错了",
+    `当前：${expr}\n估算一天触发约 ${perDay} 次。\n\n`
+    + `顺序是「分 时 日 月 周」，分在前、时在后：\n`
+    + `· 1 0 * * *  → 每天 00:01\n`
+    + `· 30 8 * * * → 每天 08:30\n\n`
+    + `逗号是「多个值」（如 8,20 两个小时都跑），不是用来分隔时和分。\n`
+    + `签到本身是幂等的（已签即跳过），但建议改回每天 1～2 次。`);
 }
