@@ -16,6 +16,7 @@ Loon / Quantumult X / Surge 签到与定时脚本合集。
 - [chelaile](chelaile/) — 车来了去广告（Loon 插件）。R1.0.2，去开屏广告与应用内广告；核心是清洗启动配置 `appToggle/getStatus` 让 App 不拉开屏素材，响应体外壳 `**YGKJ...YGKJ##` 动态保留不写死，首页金刚位按推广特征动态剔除；含 `block_httpdns` 防绕过开关。
 - [wetalk](wetalk/) — WeTalk 签到 + 视频奖励的 **Loon 外壳**。R1.0.0，脚本本体引用上游 `CaoXiaoMann/XiaoMan`（不内置）；补上作者没给的 Loon 配置，并把 cron 做成 Argument 可自定义。
 - [pingme](pingme/) — PingMe 签到 + 视频奖励的 **Loon 外壳**。R1.0.0，脚本本体引用上游 `fmz200/wool_scripts`（不内置）；把流传版本里写死的 `cron "30 8,20 * * *"` 改成 Argument 可自定义，并补上它引用却没声明的 `PingMe` 开关。
+- [sgcc](sgcc/) — 网上国网（国家电网 95598）积分签到的 **Loon 外壳**。R1.0.0，脚本本体引用上游 `MaYIHEI/paperclip`（不内置）；改用**手机号 + 密码自动登录**，**不再需要抓包和 MITM**，首次登录填一次短信验证码即可，凭证 15 天自动续期，能读到签到结果与实际错误码。⚠️ **上游为 `testing` 实验分支，2026-10-15 提交，作者自标「🧪 待验证」，随时可能变更**；需把账号密码存在本机，密码连错 5 次会锁定 30 分钟。另附协议实现实测可通记录（已排除加密/设备令牌层面的问题）。
 - [chelaile-checkin](chelaile-checkin/) — 车来了每日签到（Loon 插件）。R1.0.7，`signin` 与 `config` 鉴权不同：签到**必须**带 `secret` + `s`（只带 `udid`+`accountId` 一律 `0002 非法请求`）；`signature`/`nonce`/`h5TimeStamp` 服务端并不校验。`http-request` 钩子自动抓凭证 + cron 签到，按 `signDate` 判断当日是否已签；日志与通知里的凭证一律脱敏。
 - [sub-store-deploy](sub-store-deploy/) — 自建 Sub-Store 部署套件。R1.0.0，`sub-store.sh` 一键部署/更新，默认写好前后端同源路径与 CORS 白名单（治「网页端 403 CORS origin not allowed / 列表空白」），含端口链、前端路径、CORS 实测自检。
 
