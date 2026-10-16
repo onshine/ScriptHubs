@@ -6,7 +6,8 @@
  *
  * @Author: MaYIHEI <https://github.com/MaYIHEI/paperclip>
  * @Channel: Telegram 频道 https://t.me/mayihei
- * @Updated: 2026-10-15
+ * @Version: 2026-10-16.r6
+ * @Updated: 2026-10-16
  *
  * ===== Loon =====
  * [Argument]
@@ -16,7 +17,7 @@
  * debug = switch,false,tag=调试模式,desc=打印服务器返回
  *
  * [Script]
- * cron "30 8 * * *" script-path=https://raw.githubusercontent.com/MaYIHEI/paperclip/refs/heads/testing/app/sgcc/sgcc.js, argument=[{phone},{password},{sms},{debug}], tag=网上国网签到, timeout=60, img-url=https://raw.githubusercontent.com/MaYIHEI/pin/refs/heads/main/app/sgcc.png, enable=true
+ * cron "30 8 * * *" then script("https://raw.githubusercontent.com/MaYIHEI/paperclip/refs/heads/testing/app/sgcc/sgcc.js", {${phone}, ${password}, ${sms}, ${debug}}) with tag="网上国网签到", img_url="https://raw.githubusercontent.com/MaYIHEI/pin/refs/heads/main/app/sgcc.png", timeout=60
  *
  * ===== Surge =====
  * [Script]
@@ -40,7 +41,7 @@
  */
 
 const $ = new Env("网上国网");
-const SCRIPT_VERSION = "2026-10-15.r1"; // 改一次 +1,确认拉到最新版
+const SCRIPT_VERSION = "2026-10-16.r6"; // 改一次 +1,确认拉到最新版
 $.log(`[INFO] 脚本版本 ${SCRIPT_VERSION}`);
 
 const KEY_PHONE = "sgcc_phone";       // 账号(手机号)
@@ -50,13 +51,15 @@ const KEY_SESS = "sgcc_session";      // 登录凭证 {user,token,userId,provinc
 const KEY_DEV = "sgcc_device";        // 模拟设备 {seed,boot,install,tok}
 const KEY_PEND = "sgcc_sms_pending";  // 已发验证码 {user,codeKey,ts,used}
 const P_SIGN = "osg-omgmt1042/member/m1/0103514";
+const P_GOLD = "osg-omgmt1042/member/c1/q104051";
 // Loon 插件设置优先,没填则读 BoxJS
 const ARG = typeof $argument === "object" && $argument ? $argument : {};
 const DEBUG = ARG.debug === true || ARG.debug === "true" || $.getdata("sgcc_debug") === "true";
 
 const getJ = (k) => { try { return JSON.parse($.getdata(k) || "null"); } catch (e) { return null; } };
 const setJ = (k, v) => $.setdata(v == null ? "" : JSON.stringify(v), k);
-const post = (opt) => new Promise((ok) => $.post(opt, (err, resp, data) => ok({ err, status: resp && resp.status, data })));
+// 国网接口走直连:经境外代理出口可能触发网关风控(RK001)。Loon 用 node、Surge 用 policy、QX 用 opts.policy
+const post = (opt) => new Promise((ok) => $.post({ ...opt, node: "DIRECT", policy: "DIRECT", opts: { policy: "direct" } }, (err, resp, data) => ok({ err, status: resp && resp.status, data })));
 class SgError extends Error { constructor(code, msg) { super(msg || code); this.code = String(code || ""); } }
 
 const user = String(ARG.phone || $.getdata(KEY_PHONE) || "").replace(/\D/g, "").replace(/^86(?=1\d{10}$)/, "");
@@ -97,7 +100,10 @@ async function call(path, payload, { sess, loginP } = {}) {
   const r = await post({ url: SG_BASE + path, headers: headers(sess, loginP), body: JSON.stringify({ data, sign: sm3hex(skey + data + ts), skey, timestamp: ts }) });
   if (r.err) throw new SgError("net", "网络错误:" + r.err);
   let outer; try { outer = JSON.parse(r.data); } catch (e) { throw new SgError("net", "返回无法识别(HTTP " + r.status + ")"); }
-  if (!outer.respKey || !outer.encryptData) throw new SgError(outer.code || "net", outer.message || "返回异常");
+  if (!outer.respKey || !outer.encryptData) {
+    if (DEBUG) $.log(`[DEBUG] ${path} 网关返回 => ${String(r.data).slice(0, 300)}`);
+    throw new SgError(outer.code || "net", outer.message || "返回异常");
+  }
   const k2 = utf8dec(sm2DecryptKey(String(outer.respKey), CLIENT_PRIV));
   const resp = JSON.parse(utf8dec(sm4DecryptHex(String(outer.encryptData), k2)));
   if (DEBUG) $.log(`[DEBUG] ${path} => ${JSON.stringify(resp).slice(0, 300)}`);
@@ -124,7 +130,7 @@ async function login(code, codeKey) {
 }
 async function ensureLogin(force) {
   const s = getJ(KEY_SESS);
-  if (!force && s && s.user === user && s.token && s.exp > Date.now() + 3600000) return s;
+  if (!force && s && s.user === user && s.token && s.exp > Date.now() + 3600000) { $.log(`[INFO] 使用已保存的登录凭证(剩 ${Math.floor((s.exp - Date.now()) / 86400000)} 天)`); return s; }
   const sms = String(ARG.sms || $.getdata(KEY_SMS) || "").replace(/\D/g, "");
   const pend = getJ(KEY_PEND);
   const pendOk = pend && pend.user === user && Date.now() - pend.ts < 15 * 60000;
@@ -145,25 +151,40 @@ async function ensureLogin(force) {
 
 // ----- 签到(与 App 签到页同一请求)-----
 const signin = (sess) => call(P_SIGN, { sourceAddr: "0101-1015", timestamp: Date.now(), activityCode: "ACT20201212" }, { sess });
+// 可用签到金余额(签到页同一查询);只用于通知展示,查不到就不显示
+async function goldText(sess) {
+  try { const d = await call(P_GOLD, {}, { sess }); return String(d.rtnCode) === "1" && !isNaN(d.rtnData) ? `签到金余额 ${d.rtnData}` : ""; }
+  catch (e) { $.log(`[WARN] 查询签到金余额失败: ${e.message || e}`); return ""; }
+}
+
+// 记录本次结果,供「Cookie 体检」汇总:ok 正常 / cookie 需重新抓取 / fail 其他失败
+function saveStatus(s, msg) {
+  $.setdata(JSON.stringify({ s, msg: String(msg).slice(0, 100), t: Date.now() }), "sgcc_status");
+}
 
 async function main() {
   if (JSON.parse($.getdata("sgcc_clear") || "false")) {
     [KEY_SESS, KEY_DEV, KEY_PEND, KEY_SMS].forEach((k) => $.setdata("", k)); $.setdata("false", "sgcc_clear");
     $.msg("网上国网签到", "", "✅ 已清除登录凭证;账号密码保留"); return;
   }
-  if (!user || !pass) { $.msg("⚠️ 网上国网签到", "缺少账号密码", "在 Loon 插件设置或 BoxJS 填写网上国网手机号和密码"); return; }
+  if (!user || !pass) { saveStatus("cookie", "缺少账号密码"); $.msg("⚠️ 网上国网签到", "缺少账号密码", "在 Loon 插件设置或 BoxJS 填写网上国网手机号和密码"); return; }
 
+  const saved = getJ(KEY_SESS);
   let sess = await ensureLogin(false), d;
   try { d = await signin(sess); }
   catch (e) {
-    if (e.code !== "-200" && e.code !== "-201") throw e;
-    $.log("[INFO] 登录凭证失效,重新登录");
+    // 凭证失效时签到接口回 RK001(查询接口才回 -200/-201);用的是旧凭证才重登一次
+    const stale = e.code === "-200" || e.code === "-201" || /RK0\d/.test(e.message || "");
+    if (!stale || !saved || saved.token !== sess.token) throw e;
+    $.log(`[INFO] 登录凭证失效(${e.code}),重新登录`);
     sess = await ensureLogin(true); d = await signin(sess);
   }
   // rtnCode 1=签到成功(rtnData=获得签到金),102007=今日已签
-  if (String(d.rtnCode) === "1") $.msg("✅ 网上国网签到", "今日签到完成 ✓", isNaN(d.rtnData) ? "" : `获得 ${d.rtnData} 签到金`);
-  else if (String(d.rtnCode) === "102007") $.msg("✅ 网上国网签到", "今日已签到", "");
-  else $.msg("⚠️ 网上国网签到", "签到失败", `${d.rtnMessage || ""} [${d.rtnCode}]`);
+  const code = String(d.rtnCode);
+  const gold = code === "1" || code === "102007" ? await goldText(sess) : "";
+  if (code === "1") { saveStatus("ok", "今日签到完成"); $.msg("✅ 网上国网签到", "今日签到完成 ✓", [isNaN(d.rtnData) ? "" : `获得 ${d.rtnData} 签到金`, gold].filter(Boolean).join(" · ")); }
+  else if (code === "102007") { saveStatus("ok", "今日已签到"); $.msg("✅ 网上国网签到", "今日已签到", gold); }
+  else { saveStatus("fail", `${d.rtnMessage || ""} [${d.rtnCode}]`); $.msg("⚠️ 网上国网签到", "签到失败", `${d.rtnMessage || ""} [${d.rtnCode}]`); }
 }
 
 /* ===== 国网 App 协议(加密 + Turing 设备令牌 + 登录参数)=====
@@ -455,5 +476,7 @@ function Env(t,e){class s{constructor(t){this.env=t}send(t,e="GET"){t="string"==
 // 协议常量在下方定义,入口放最后
 main().catch((e) => {
   $.log("[ERROR] " + (e.code || "") + " " + (e.message || e));
-  $.msg("⚠️ 网上国网签到", e.code === "4006" ? "首次登录需短信验证" : "登录/签到异常", (e.message || String(e)) + (e.code && e.code !== "4006" ? ` [${e.code}]` : ""));
+  saveStatus(e.code === "4006" ? "cookie" : "fail", e.code === "4006" ? "需短信验证后重新登录" : `${e.message || e}${e.code ? ` [${e.code}]` : ""}`);
+  const rk = /RK0\d/.test(e.message || "") ? " | 国网风控拦截:已重新登录仍失败,确认 Loon 对 sgcc.com.cn 走直连后稍后再试" : "";
+  $.msg("⚠️ 网上国网签到", e.code === "4006" ? "首次登录需短信验证" : "登录/签到异常", (e.message || String(e)) + (e.code && e.code !== "4006" ? ` [${e.code}]` : "") + rk);
 }).finally(() => $.done());

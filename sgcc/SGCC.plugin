@@ -1,5 +1,5 @@
 #!name=网上国网签到
-#!desc=网上国网(国家电网 95598)积分每日签到。<b>R1.0.2 修好了「插件里看不到脚本行」的问题（旧式 img-url 键名属非法项，会让 Loon 丢弃整个模块）。装了 R1.0.0/R1.0.1 的请删掉重新添加。</b>脚本已内置本仓库（不再依赖上游实验分支，上游删库/改路径也不影响）。用手机号 + 密码自动登录并签到，<b>无需抓包、无需 MITM</b>。<b>首次登录需短信验证码</b>：填好账密后点脚本行的 ▷ 手动运行一次，收到验证码填进「短信验证码」再运行一次即可。此后每天自动登录签到，凭证 15 天自动重登。<b>更新后请删除旧插件重新添加</b>，否则 Loon 会继续跑缓存里的旧脚本。
+#!desc=网上国网(国家电网 95598)积分每日签到。同步上游 2026-10-16.r6。<b>本次更新修了 RK001 风控的应对</b>：签到凭证失效时签到接口回的是 RK001（不是查询接口的 -200/-201），旧版因此不会重新登录 → 新版会重登一次再试；同时把国网接口<b>强制走直连</b>（经境外代理出口极易触发网关风控）。签到成功会一并显示<b>签到金余额</b>。<b>用手机号 + 密码自动登录，无需抓包、无需 MITM；首次登录需短信验证码</b>：填好账密后点脚本行 ▷ 手动运行，收到验证码填进「短信验证码」再运行一次。<b>更新后请删除旧插件重新添加</b>，否则 Loon 会继续跑缓存里的旧脚本。
 #!author=MaYIHEI（脚本）· Minis（Loon 外壳）
 #!homepage=https://github.com/onshine/ScriptHubs/tree/main/sgcc
 #!icon=https://raw.githubusercontent.com/MaYIHEI/pin/refs/heads/main/app/sgcc.png
@@ -14,4 +14,4 @@ cron = input,"30 8 * * *",tag=签到时间,desc=默认每天 8:30，格式：分
 debug = switch,false,tag=调试模式,desc=在 Loon 日志里打印服务器返回内容
 
 [Script]
-cron ${cron} then script("https://raw.githubusercontent.com/onshine/ScriptHubs/main/sgcc/sgcc.js", {${phone}, ${password}, ${sms}, ${debug}}) with tag="网上国网签到", timeout=60
+cron ${cron} then script("https://raw.githubusercontent.com/onshine/ScriptHubs/main/sgcc/sgcc.js", {${phone}, ${password}, ${sms}, ${debug}}) with tag="网上国网签到", img_url="https://raw.githubusercontent.com/MaYIHEI/pin/refs/heads/main/app/sgcc.png", timeout=60
