@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# workbuddy2api + workbuddy-manager 部署 / 更新脚本 R1.0.3
+# workbuddy2api + workbuddy-manager 部署 / 更新脚本 R1.0.4
 #
 # 版本记录见同目录 README.md 末尾「版本记录」表。
 # 适用：1Panel 服务器（Docker + docker compose v2），amd64 / arm64
@@ -32,7 +32,7 @@
 #   ./workbuddy2api.sh logs                 # 跟踪日志
 set -euo pipefail
 
-SCRIPT_VERSION="R1.0.3"
+SCRIPT_VERSION="R1.0.4"
 
 # ============ CONFIG（可用环境变量覆盖） ============
 DOMAIN="${DOMAIN:-workbuddy.example.com}"
@@ -710,6 +710,18 @@ EOF
 log "修正数据目录属主为 10001（两个容器的运行 uid）"
 chown -R 10001:10001 "$GW_DIR/auths" "$GW_DIR/data" "$PANEL_DIR/data"
 chmod 700 "$GW_DIR/auths"
+
+# 上游【根目录】也要交给 10001 —— 只改 auths/ 与 data/ 是不够的：
+#   · 面板「设置」页保存时会先写 `.config.json.XXXX.tmp` 再 os.replace
+#     （server/security.py 的原子写），这一步需要**目录**写权限；
+#     目录若是 root:root 755，保存直接 500 PermissionError。
+#   · docker-compose.yml 是 600：属主不对面板读不到，更新上游/端口收敛会失败。
+# 这两处都属于「保存设置报 Internal Server Error」的根因。
+chown 10001:10001 "$GW_DIR" 2>/dev/null || true
+chown 10001:10001 "$GW_DIR/config.json" 2>/dev/null || true
+chown 10001:10001 "$GW_DIR/docker-compose.yml" 2>/dev/null || true
+
+# 旧版本留下的 .orig 备份不必交给 10001（只读存档），保持原样即可
 
 # ─── 4b. 共享网络（仅 bridge 模式）───
 # 面板与网关必须能互通，否则界面显示「上游连接：不可用」。
