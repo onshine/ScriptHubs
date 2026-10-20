@@ -37,6 +37,8 @@
 
 ## 二、快速开始
 
+> **路径约定（重要）**：面板容器持有 `/var/run/docker.sock`，一键更新时由宿主 Docker daemon 执行 compose。`WB_UPSTREAM_DIR` / `WB_AUTH_DIR` / `WB_UPSTREAM_CONFIG` 和 bind mount 的目标路径必须使用**宿主机绝对路径**（本脚本会设为 `/opt/workbuddy/workbuddy2api`），不能使用仅存在于面板容器内的 `/opt/workbuddy2api` 别名，否则 compose 重建网关时可能把目录挂到文件上并报 OCI `not a directory`。详见 5.13。
+
 ```bash
 git clone <本仓库>
 cd workbuddy2api-manager
@@ -671,6 +673,54 @@ chmod +x /root/wb2api-update.sh
 
 ---
 
+### 5.13 管理端更新后网关停在 `Created`：宿主 bind mount 路径错位
+
+**症状**：面板升级后显示新版本，但「上游连接：不可用」；`workbuddy2api` 容器为 `Created`，日志出现：
+
+```text
+error mounting "/opt/workbuddy2api/config.json" to "/app/config.json":
+not a directory: Are you trying to mount a directory onto a file (or vice-versa)?
+```
+
+**根因**：管理端容器拿到 `/var/run/docker.sock` 后，执行 compose 的其实是**宿主 Docker daemon**。
+compose 中 volumes 左边的源路径按宿主路径解释，不能用一个只在管理端容器内有意义的路径别名。
+本套件的宿主上游目录是 `/opt/workbuddy/workbuddy2api`；如果 `WB_UPSTREAM_DIR` 却设成
+`/opt/workbuddy2api`，updater 会在容器内该目录执行 compose，而 daemon 又把 compose 中的
+`./config.json` 锚定到宿主 `/opt/workbuddy2api/config.json`。该位置可能是目录或不存在，
+就会出现 OCI `not a directory`，网关无法启动。
+
+**永久修复**：管理端的三个 `WB_*` 路径与 bind mount 目标必须指向同一个**宿主绝对路径**：
+
+```yaml
+WB_AUTH_DIR: /opt/workbuddy/workbuddy2api/auths
+WB_UPSTREAM_CONFIG: /opt/workbuddy/workbuddy2api/config.json
+WB_UPSTREAM_DIR: /opt/workbuddy/workbuddy2api
+volumes:
+  - /opt/workbuddy/workbuddy2api:/opt/workbuddy/workbuddy2api
+```
+
+新部署脚本 **R1.0.5** 会自动写成 `${GW_DIR}`，不会再把容器路径别名误当宿主路径。
+现有部署在 `/opt/workbuddy/workbuddy-manager/docker-compose.yml` 手动修正后重建管理端：
+
+```bash
+cd /opt/workbuddy/workbuddy-manager
+cp docker-compose.yml docker-compose.yml.bak-$(date +%F-%H%M%S)
+# 将 WB_AUTH_DIR / WB_UPSTREAM_CONFIG / WB_UPSTREAM_DIR 以及 mount destination
+# 全部改成 /opt/workbuddy/workbuddy2api 对应的宿主绝对路径
+docker compose config >/dev/null && docker compose up -d --force-recreate workbuddy-manager
+```
+
+检查实际生效的映射和环境变量：
+
+```bash
+docker inspect workbuddy-manager --format '{{range .Mounts}}{{.Source}} -> {{.Destination}}{{"\n"}}{{end}}'
+docker exec workbuddy-manager env | grep -E '^WB_(AUTH_DIR|UPSTREAM_CONFIG|UPSTREAM_DIR)='
+```
+
+> 路径修正前，避免在面板点「仅上游」或「全部更新」；它们可能再次用错误宿主源路径重建网关。
+
+---
+
 ## 六、安全基线
 
 - [ ] 两个容器都只绑 `127.0.0.1`，不对公网暴露
@@ -726,7 +776,7 @@ workbuddy2api-manager/
 
 | 版本 | 说明 |
 |---|---|
-| R1.0.4 | **修「面板保存设置报 Internal Server Error」**（实测踩到）：面板存配置走 `server/security.py` 的原子写 —— 先写 `.config.json.XXXX.tmp` 再 `os.replace`，**这一步需要上游【目录】的写权限**。而脚本此前只 `chown` 了 `auths/`、`data/`，上游根目录仍是 `root:root 755` → 面板（uid 10001）创建临时文件被拒，`PermissionError: [Errno 13] ... .config.json.XXXX.tmp`，整个保存动作 500。同时 `docker-compose.yml` 是 `600 root:root`，面板读不到（影响更新上游/端口收敛）。现改为：上游根目录、`config.json`、`docker-compose.yml` 一并交给 10001。**已部署的机器手动修**：`chown 10001:10001 /opt/workbuddy/workbuddy2api` + `chown 10001:10001 /opt/workbuddy/workbuddy2api/{config.json,docker-compose.yml}`。 |
+| R1.0.5 | **修复面板 v2.7.0 更新后重建网关的 bind mount 路径错位**。本套件原先把宿主机 `/opt/workbuddy/workbuddy2api` 挂到面板容器 `/opt/workbuddy2api`，但面板通过 `docker.sock` 在宿主机执行 compose；宿主机解析 bind mount 源路径时把容器内路径 `/opt/workbuddy2api/config.json` 当成宿主路径，实际该路径是目录（或不存在），导致 OCI `not a directory`，网关停在 `Created`、面板显示「上游连接不可用」。现将面板环境变量 `WB_UPSTREAM_DIR` / `WB_AUTH_DIR` / `WB_UPSTREAM_CONFIG` 与 mount target 统一为 `${GW_DIR}`（默认 `/opt/workbuddy/workbuddy2api`），使面板进程路径同时也是 Docker daemon 可见的宿主机路径；host 与 bridge compose 模板均修复。已有部署手动修复：把面板 compose 的三项路径与 bind mount target 改为 `/opt/workbuddy/workbuddy2api`，再 force-recreate 面板。新增 README 5.13 诊断与现有部署修复命令。 |
 | R1.0.3 | **修正 5.8 认知错误 + 修复 bridge 模式缺陷 + 应对上游删库**。① 原文称「官方作者建议不挂 docker.sock」，实际读上游仓库后确认**反了** —— 官方 compose 里该行默认启用，且注释明确论证「挂 socket 与原生 root 部署权限等价，不是新增风险」；新增 `open-docker-ctl.sh`（诊断 / 开启 / 关闭面板 docker 控制能力，幂等、带 compose 备份与 YAML 校验）；重写 5.8，区分 `permission denied`（补 group_add）与 `command not found`（缺镜像 CLI，补组无效）。② **修复 bridge 模式多个致命缺陷** —— a) `WB2API_BASE` 默认写成 `http://host.docker.internal:GW_PORT`，该值只对 `NET_MODE=host` 成立；bridge 模式下两个容器各在独立网络，`host.docker.internal` 解析到 docker0 网桥，而网关端口只绑宿主 `127.0.0.1`，**必然连不上**，界面显示「上游连接：不可用」。现改为自动创建自定义网络 `workbuddy-net`，两容器均接入，`WB2API_BASE` 用**容器名** `http://workbuddy2api:GW_PORT` 走 docker 内建 DNS（端口仍只绑回环，不暴露）。b) bridge 分支缺 `group_add` → 「一键更新」`permission denied`；现动态探测 `getent group docker` 的 GID 注入（**各机 GID 不同**：实测 firadio=995、Yuusei=989，写死必错）。c) 面板 healthcheck 探针误用宿主端口 17864，改为容器内端口 7864（与 5.7 网关同类 bug）。d) 部署后自检新增「面板 → 上游连通性」一项，直接打 `WB2API_BASE` 并给出分模式排错提示 —— 此前脚本**完全没有验证这一项**，导致部署「全绿」但界面不可用。e) `net-check.sh` 第 2 步原用 `127.0.0.1:GW_PORT` 探测（在面板容器里指向它自己，必误报），改为先读取真实 `WB2API_BASE`。f) README 5.7 修正端口表述：容器内监听是 `GW_CTR_PORT`/`WB2A_LISTEN`，`GW_PORT` 仅为宿主映射，两者不可混用。③ **`Sliverkiss/workbuddy2api` 仓库与 GHCR 镜像双双消失（GitHub 404 / GHCR 403）** —— 「一键更新 → 仅上游」必定失败；`workbuddy2api.sh` 生成的 compose 与 `docker pull` 改用延续仓库 `ghcr.io/hanawabanana/workbuddy2api:latest`（`is_our_compose()` 仍保留 sliverkiss 特征以兼容老部署）；新增 `wb2api-migrate.sh` 一键迁移（备份校验 + 账号数比对 + 失败自动回滚）与 README 5.10。④ **README 5.11 / 脚本 R1.0.1**：bridge 模式下 `docker network connect` 加的共享网卡**不随 compose recreate 保留**，重建网关后面板必现「上游连接：不可用」。迁移脚本改为：体检时检查 compose 是否声明 `networks` 段，自检时主动探测**面板 → 网关连通性**并在确认是共享网络丢失时**自动补回网卡**。。⑤ **新增 `wb2api-update.sh` 与 README 5.12**：面板的「一键更新 → 上游」只支持 ① git 仓库 ② 随包分发的源码（`install.sh` 装的，它 `docker compose build`）两种形态；本套件生成的是第三种「**预构建镜像**」，面板会直接跳过（`不是 git 仓库，跳过上游更新`）——不是故障而是形态不匹配。为镜像式部署补上专用更新脚本（pull + force-recreate，含备份/账号数比对/面板连通性自检/回滚提示）。 |
 | R1.0.2 | **修正网关容器永远 `unhealthy`**：官方镜像 healthcheck 写死探测 `127.0.0.1:7863/healthz`，而本脚本让网关监听 `GW_PORT`（默认 17863），两者不一致导致连续失败（服务实际正常）。生成 compose 时覆盖为实际端口（host/bridge 两个分支都已处理）。此问题会让**告警彻底失效**（永远红 → 真挂了也看不出）。新增 README 5.7/5.8/5.9：unhealthy 修复、面板「无法操作 docker」的权限诊断（`group_add` 与风险）、不依赖面板按钮的上游/面板更新命令与三个坑。 |
 | R1.0.1 | 主脚本 `deploy.sh` 更名为 `workbuddy2api.sh`（脚本内容与 R1.0.0 完全一致，仅自身引用文案随之更新）。原 `deploy.sh` 保留为**兼容外壳**，透传参数到新脚本，旧命令继续可用 —— 已部署的服务器无需任何操作。README 命令示例统一改为新名。 |

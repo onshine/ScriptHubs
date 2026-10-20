@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# workbuddy2api + workbuddy-manager 部署 / 更新脚本 R1.0.4
+# workbuddy2api + workbuddy-manager 部署 / 更新脚本 R1.0.5
 #
 # 版本记录见同目录 README.md 末尾「版本记录」表。
 # 适用：1Panel 服务器（Docker + docker compose v2），amd64 / arm64
@@ -32,7 +32,7 @@
 #   ./workbuddy2api.sh logs                 # 跟踪日志
 set -euo pipefail
 
-SCRIPT_VERSION="R1.0.4"
+SCRIPT_VERSION="R1.0.5"
 
 # ============ CONFIG（可用环境变量覆盖） ============
 DOMAIN="${DOMAIN:-workbuddy.example.com}"
@@ -671,15 +671,21 @@ ${PANEL_NET_BLOCK}
       WB_ENABLE_DOCS: "0"
       WB2API_MODE: docker
       WB2API_CONTAINER: ${GW_NAME}
-      WB_AUTH_DIR: /opt/workbuddy2api/auths
-      WB_UPSTREAM_CONFIG: /opt/workbuddy2api/config.json
-      WB_UPSTREAM_DIR: /opt/workbuddy2api
+      # docker.sock 由 Docker daemon 在**宿主机**执行 compose，因此 WB_* 路径必须
+      # 同时是宿主可见的 bind mount 源路径。别写容器内别名 /opt/workbuddy2api，
+      # 否则 updater 的 docker compose 会把宿主 /opt/workbuddy2api/config.json
+      # 当成文件源；若该路径缺失/成为目录，网关重建报 OCI "not a directory"。
+      WB_AUTH_DIR: ${GW_DIR}/auths
+      WB_UPSTREAM_CONFIG: ${GW_DIR}/config.json
+      WB_UPSTREAM_DIR: ${GW_DIR}
       WB_TRUSTED_PROXY_CIDRS: "${TRUSTED_PROXY_CIDRS}"
       WB_TRUSTED_PROXY_HOPS: "1"
 ${PANEL_PORTS_BLOCK}
     volumes:
       - ./data:/app/data
-      - ${GW_DIR}:/opt/workbuddy2api
+      # 面板通过 docker.sock 在宿主执行 compose，因此容器内上游路径也要使用宿主绝对路径。
+      # source 与 target 同为 ${GW_DIR}，确保 Docker daemon 用同一路径解析 config.json。
+      - ${GW_DIR}:${GW_DIR}
       # docker.sock：换取「保存设置后自动重启上游 / 读上游日志 / 网页更新上游」
       # 不想要就注释掉，相关功能会自动降级为界面提示
       - /var/run/docker.sock:/var/run/docker.sock
