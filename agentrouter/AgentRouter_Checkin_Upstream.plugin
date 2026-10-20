@@ -1,0 +1,12 @@
+#!name=AgentRouter签到 · 上游原版（MaYIHEI）
+#!desc=每日自动签到，查看奖励、余额与累计消耗；账号设置读 BoxJS。脚本引用上游 <code>MaYIHEI/paperclip</code> 的 <code>app/agentrouter/agentrouter.js</code>（不内置），<b>作者更新这里自动跟上</b>。<b>与「AgentRouter签到 · ScriptHubs 本地版」二选一</b>：两者开着会重复签到。<b>更新后请删除旧插件重新添加</b>。
+#!author=773075692, MaYIHEI（脚本）· Minis（Loon 外壳）
+#!homepage=https://github.com/MaYIHEI/paperclip/tree/main/loon/agentrouter
+#!icon=https://raw.githubusercontent.com/MaYIHEI/paperclip/refs/heads/main/app/agentrouter/icon.png
+#!tag=签到
+
+[Argument]
+cron = input,"0 9 * * *",tag=签到时间,desc=默认每天 9:00，格式：分 时 日 月 周
+
+[Script]
+cron ${cron} then script("https://raw.githubusercontent.com/MaYIHEI/paperclip/refs/heads/main/app/agentrouter/agentrouter.js") with tag="AgentRouter签到·上游", img_url="https://raw.githubusercontent.com/MaYIHEI/paperclip/refs/heads/main/app/agentrouter/icon.png", timeout=300

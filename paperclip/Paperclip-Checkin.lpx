@@ -1,0 +1,133 @@
+#!name=Paperclip · 签到合集（onshine 外壳）
+#!desc=Paperclip 全部在用签到脚本的定时签到。脚本本体<b>引用上游 MaYIHEI/paperclip</b>（不内置），作者更新脚本这里自动跟上。每个脚本一个签到开关（默认全开，没抓 Cookie 的自动跳过）；「统一通知」打开后每天一条汇总，关闭则各自推送。Cookie 用同仓库的「Paperclip · Cookie 抓取合集」抓。相比作者原插件：①<b>每个脚本的签到时间都可改</b>（留空＝上游默认）；②<b>汇总时间可改</b>；③修掉上游「小米抽奖」<code>0 30 7 * * *</code> 六段 cron 永不触发的问题；④<b>补 6 个上游插件没收录的脚本</b>：特来电（<b>引用你的 gist 原文，内容一个字没改</b>）、松山棉店、笔笔省、CASETiFY、驴充充、滔搏。⚠️ 与原插件<b>二选一</b>：先删除原插件再添加本插件，否则会重复签到。需 Loon 3.5.1(983)+。<b>更新后请删除旧插件重新添加</b>。
+#!author=MaYIHEI（脚本）· Minis（Loon 外壳）
+#!homepage=https://github.com/MaYIHEI/paperclip/tree/main/loon/paperclip-checkin
+#!icon=https://raw.githubusercontent.com/MaYIHEI/pin/refs/heads/main/app/paperclip-checkin.png
+#!tag=签到
+#!loon_version=3.5.1(983)
+
+[Argument]
+merge = switch,true,tag=【统一通知】每天一条汇总,desc=打开后各脚本不再单独弹通知，按「汇总时间」统一发一条；关闭则各自推送
+summary_cron = input,"30 11 * * *",tag=　└ 汇总时间,desc=默认 30 11 * * *（每天 11:30）
+weibotalk = switch,true,tag=【微博超话】签到
+weibotalk_cron = input,"",tag=　└ 时间,desc=留空＝上游默认 0 8 * * *
+tenvideo = switch,true,tag=【腾讯视频】签到
+tenvideo_cron = input,"",tag=　└ 时间,desc=留空＝上游默认 10 0 * * *
+mihoyo = switch,true,tag=【米游社】签到
+mihoyo_cron = input,"",tag=　└ 时间,desc=留空＝上游默认 13 6 * * *
+newmixc = switch,true,tag=【一点万象】签到
+newmixc_cron = input,"",tag=　└ 时间,desc=留空＝上游默认 37 8 * * *
+mishop = switch,true,tag=【小米商城】签到
+mishop_cron = input,"",tag=　└ 时间,desc=留空＝上游默认 15 8 * * *
+milottery = switch,true,tag=【小米抽奖】签到
+milottery_cron = input,"",tag=　└ 时间,desc=留空＝上游默认 30 8 * * *
+youpin = switch,true,tag=【小米有品】签到
+youpin_cron = input,"",tag=　└ 时间,desc=留空＝上游默认 5 9 * * *
+lhtj_app = switch,true,tag=【龙湖天街 App】签到
+lhtj_app_cron = input,"",tag=　└ 时间,desc=留空＝上游默认 0-59/19 8-10 * * *
+qqmusic = switch,true,tag=【QQ音乐】签到与任务
+qqmusic_cron = input,"",tag=　└ 时间,desc=留空＝上游默认 0 30 7 * * *
+qqmusic = switch,true,tag=【QQ音乐】签到与任务
+qqmusic_cron = input,"",tag=　└ 时间,desc=留空＝上游默认 0 * 9-10 * * *
+qqmusic = switch,true,tag=【QQ音乐】签到与任务
+qqmusic_cron = input,"",tag=　└ 时间,desc=留空＝上游默认 0 5 0,8,12,16,20,22 * * *
+wanda = switch,true,tag=【万达电影】签到
+wanda_cron = input,"",tag=　└ 时间,desc=留空＝上游默认 20 9 * * *
+tingtingfm = switch,true,tag=【听听FM】签到
+tingtingfm_cron = input,"",tag=　└ 时间,desc=留空＝上游默认 20 9 * * *
+wps = switch,true,tag=【WPS】签到与福利
+wps_cron = input,"",tag=　└ 时间,desc=留空＝上游默认 0 10 * * *
+camscanner = switch,true,tag=【扫描全能王】抽奖
+camscanner_cron = input,"",tag=　└ 时间,desc=留空＝上游默认 15 10 * * *
+dreame = switch,true,tag=【追觅】签到
+dreame_cron = input,"",tag=　└ 时间,desc=留空＝上游默认 33 8 * * *
+linghu = switch,true,tag=【灵狐灵购】签到
+linghu_cron = input,"",tag=　└ 时间,desc=留空＝上游默认 33 8 * * *
+nodeseek = switch,true,tag=【NodeSeek】签到
+nodeseek_cron = input,"",tag=　└ 时间,desc=留空＝上游默认 0 8 * * *
+pan1 = switch,true,tag=【123社区】签到
+pan1_cron = input,"",tag=　└ 时间,desc=留空＝上游默认 10 8 * * *
+agentrouter = switch,true,tag=【AgentRouter】签到
+agentrouter_cron = input,"",tag=　└ 时间,desc=留空＝上游默认 0 9 * * *
+sgcc = switch,true,tag=【网上国网】签到
+sgcc_cron = input,"",tag=　└ 时间,desc=留空＝上游默认 30 8 * * *
+baidunetdisk = switch,true,tag=【百度网盘】成长值签到
+baidunetdisk_cron = input,"",tag=　└ 时间,desc=留空＝上游默认 15 8 * * *
+laifen = switch,true,tag=【徕芬】签到
+laifen_cron = input,"",tag=　└ 时间,desc=留空＝上游默认 40 8 * * *
+ppmt = switch,true,tag=【泡泡玛特】签到
+ppmt_cron = input,"",tag=　└ 时间,desc=留空＝上游默认 0 9 * * *
+tuhu = switch,true,tag=【途虎养车】签到
+tuhu_cron = input,"",tag=　└ 时间,desc=留空＝上游默认 17 7 * * *
+haidilao = switch,true,tag=【海底捞】签到
+haidilao_cron = input,"",tag=　└ 时间,desc=留空＝上游默认 23 7 * * *
+huisheng = switch,true,tag=【惠省红包墙】领券
+huisheng_cron = input,"",tag=　└ 时间,desc=留空＝上游默认 5 0 * * *
+miniso = switch,true,tag=【名创优品】签到
+miniso_cron = input,"",tag=　└ 时间,desc=留空＝上游默认 37 7 * * *
+longde = switch,true,tag=【龙德广场】签到
+longde_cron = input,"",tag=　└ 时间,desc=留空＝上游默认 5 8 * * *
+lhtj = switch,true,tag=【龙湖天街】签到
+lhtj_cron = input,"",tag=　└ 时间,desc=留空＝上游默认 0 9 * * *
+wedome = switch,true,tag=【味多美】签到
+wedome_cron = input,"",tag=　└ 时间,desc=留空＝上游默认 10 8 * * *
+bhg = switch,true,tag=【北京华联】签到
+bhg_cron = input,"",tag=　└ 时间,desc=留空＝上游默认 8 8 * * *
+linli = switch,true,tag=【林里】签到
+linli_cron = input,"",tag=　└ 时间,desc=留空＝上游默认 0 10 * * *
+
+# ---- 上游插件未收录的补充脚本 ----
+teld = switch,true,tag=【特来电】签到,desc=打开特来电小程序进「签到365天」页触发
+teld_cron = input,"",tag=　└ 时间,desc=留空＝默认 0-59/19 8-10 * * *
+songshan = switch,true,tag=【松山棉店】签到,desc=打开松山棉店小程序进「签到」页触发
+songshan_cron = input,"",tag=　└ 时间,desc=留空＝默认 20 8 * * *
+bibisheng = switch,true,tag=【笔笔省】领券,desc=微信支付「笔笔省」小程序领每日礼券
+bibisheng_cron = input,"",tag=　└ 时间,desc=留空＝默认 30 7 * * *
+casetify = switch,true,tag=【CASETiFY】签到,desc=打开 CASETiFY 小程序进会员页触发
+casetify_cron = input,"",tag=　└ 时间,desc=留空＝默认 5 0 * * *
+lvcchong = switch,true,tag=【驴充充】签到,desc=打开驴充充 App / 小程序进首页触发
+lvcchong_cron = input,"",tag=　└ 时间,desc=留空＝默认 20 8 * * *
+topsports = switch,true,tag=【滔搏】签到,desc=打开滔搏小程序进签到页触发
+topsports_cron = input,"",tag=　└ 时间,desc=留空＝默认 15 8 * * *
+
+[Script]
+cron ${summary_cron} then script("https://raw.githubusercontent.com/MaYIHEI/paperclip/refs/heads/main/app/summary/summary.js", {${weibotalk, ${songshan}}) with tag="签到汇总", img_url="https://raw.githubusercontent.com/MaYIHEI/pin/refs/heads/main/app/paperclip-checkin.png", enable=${merge}
+cron ${weibotalk_cron} then script("https://raw.githubusercontent.com/MaYIHEI/paperclip/refs/heads/main/app/weibotalk/weibotalk.js", {${merge}}) with tag="微博超话签到", img_url="https://raw.githubusercontent.com/MaYIHEI/pin/refs/heads/main/app/weibo.png", enable=${weibotalk}
+cron ${tenvideo_cron} then script("https://raw.githubusercontent.com/MaYIHEI/paperclip/refs/heads/main/app/tenvideo/tenvideo.js", {${merge}}) with tag="腾讯视频签到", img_url="https://raw.githubusercontent.com/MaYIHEI/pin/refs/heads/main/app/tenvideo.png", enable=${tenvideo}
+cron ${mihoyo_cron} then script("https://raw.githubusercontent.com/MaYIHEI/paperclip/refs/heads/main/app/mihoyo/mihoyo.js", {${merge}}) with tag="米游社签到", img_url="https://raw.githubusercontent.com/MaYIHEI/pin/refs/heads/main/app/mihoyo.png", enable=${mihoyo}
+cron ${newmixc_cron} then script("https://raw.githubusercontent.com/MaYIHEI/paperclip/refs/heads/main/app/newmixc/newmixc.js", {${merge}}) with tag="一点万象签到", img_url="https://raw.githubusercontent.com/MaYIHEI/pin/refs/heads/main/app/newmixc.png", enable=${newmixc}
+cron ${mishop_cron} then script("https://raw.githubusercontent.com/MaYIHEI/paperclip/refs/heads/main/app/mishop/mishop.js", {${merge}}) with tag="小米商城签到", img_url="https://raw.githubusercontent.com/MaYIHEI/pin/refs/heads/main/app/mishop.png", enable=${mishop}
+cron ${milottery_cron} then script("https://raw.githubusercontent.com/MaYIHEI/paperclip/refs/heads/main/app/milottery/milottery.js", {${merge}}) with tag="小米抽奖签到", img_url="https://raw.githubusercontent.com/MaYIHEI/pin/refs/heads/main/app/mishop.png", timeout=360, enable=${milottery}
+cron ${youpin_cron} then script("https://raw.githubusercontent.com/MaYIHEI/paperclip/refs/heads/main/app/youpin/youpin.js", {${merge}}) with tag="有品签到", img_url="https://raw.githubusercontent.com/MaYIHEI/pin/refs/heads/main/app/youpin.png", enable=${youpin}
+cron ${lhtj_app_cron} then script("https://raw.githubusercontent.com/MaYIHEI/paperclip/refs/heads/main/app/lhtj/lhtj.js", {${merge}}) with tag="龙湖App签到", img_url="https://raw.githubusercontent.com/MaYIHEI/pin/refs/heads/main/app/lhtj.png", enable=${lhtj_app}
+cron ${qqmusic_cron} then script("https://raw.githubusercontent.com/MaYIHEI/paperclip/refs/heads/main/app/qqmusic/qqmusic.js", {${merge}}) with tag="QQ音乐每日任务", img_url="https://raw.githubusercontent.com/MaYIHEI/pin/refs/heads/main/app/qqmusic.png", enable=${qqmusic}
+cron ${qqmusic_cron} then script("https://raw.githubusercontent.com/MaYIHEI/paperclip/refs/heads/main/app/qqmusic/qqmusic.js", {${merge}}) with tag="QQ音乐定时金币", img_url="https://raw.githubusercontent.com/MaYIHEI/pin/refs/heads/main/app/qqmusic.png", enable=${qqmusic}
+cron ${qqmusic_cron} then script("https://raw.githubusercontent.com/MaYIHEI/paperclip/refs/heads/main/app/qqmusic/qqmusic.js", {${merge}}) with tag="QQ音乐红包雨", img_url="https://raw.githubusercontent.com/MaYIHEI/pin/refs/heads/main/app/qqmusic.png", enable=${qqmusic}
+cron ${wanda_cron} then script("https://raw.githubusercontent.com/MaYIHEI/paperclip/refs/heads/main/app/wanda/wanda.js", {${merge}}) with tag="万达电影签到", img_url="https://raw.githubusercontent.com/MaYIHEI/pin/refs/heads/main/app/wanda.png", enable=${wanda}
+cron ${tingtingfm_cron} then script("https://raw.githubusercontent.com/MaYIHEI/paperclip/refs/heads/main/app/tingtingfm/tingtingfm.js", {${merge}}) with tag="听听FM签到", img_url="https://raw.githubusercontent.com/MaYIHEI/pin/refs/heads/main/app/tingtingfm.png", enable=${tingtingfm}
+cron ${wps_cron} then script("https://raw.githubusercontent.com/MaYIHEI/paperclip/refs/heads/main/app/wps/wps.js", {${merge}}) with tag="WPS签到", img_url="https://raw.githubusercontent.com/MaYIHEI/pin/refs/heads/main/app/wps.png", enable=${wps}
+cron ${camscanner_cron} then script("https://raw.githubusercontent.com/MaYIHEI/paperclip/refs/heads/main/app/camscanner/camscanner.js", {${merge}}) with tag="扫描全能王签到", img_url="https://raw.githubusercontent.com/MaYIHEI/pin/refs/heads/main/app/camscanner.png", enable=${camscanner}
+cron ${dreame_cron} then script("https://raw.githubusercontent.com/MaYIHEI/paperclip/refs/heads/main/app/dreame/dreame.js", {${merge}}) with tag="追觅签到", img_url="https://raw.githubusercontent.com/MaYIHEI/pin/refs/heads/main/app/dreame.png", enable=${dreame}
+cron ${linghu_cron} then script("https://raw.githubusercontent.com/MaYIHEI/paperclip/refs/heads/main/app/linghu/linghu.js", {${merge}}) with tag="灵狐灵购签到", img_url="https://raw.githubusercontent.com/MaYIHEI/pin/refs/heads/main/app/linghu.png", enable=${linghu}
+cron ${nodeseek_cron} then script("https://raw.githubusercontent.com/MaYIHEI/paperclip/refs/heads/main/app/nodeseek/nodeseek.js", {${merge}}) with tag="NodeSeek签到", img_url="https://raw.githubusercontent.com/MaYIHEI/pin/refs/heads/main/app/nodeseek.png", enable=${nodeseek}
+cron ${pan1_cron} then script("https://raw.githubusercontent.com/MaYIHEI/paperclip/refs/heads/main/app/pan1/pan1.js", {${merge}}) with tag="123社区签到", img_url="https://raw.githubusercontent.com/MaYIHEI/pin/refs/heads/main/app/pan1.png", enable=${pan1}
+cron ${agentrouter_cron} then script("https://raw.githubusercontent.com/MaYIHEI/paperclip/refs/heads/main/app/agentrouter/agentrouter.js", {${merge}}) with tag="AgentRouter签到", img_url="https://raw.githubusercontent.com/MaYIHEI/paperclip/refs/heads/main/app/agentrouter/icon.png", timeout=300, enable=${agentrouter}
+cron ${sgcc_cron} then script("https://raw.githubusercontent.com/MaYIHEI/paperclip/refs/heads/main/app/sgcc/sgcc.js", {${merge}}) with tag="网上国网签到", img_url="https://raw.githubusercontent.com/MaYIHEI/pin/refs/heads/main/app/sgcc.png", timeout=60, enable=${sgcc}
+cron ${baidunetdisk_cron} then script("https://raw.githubusercontent.com/MaYIHEI/paperclip/refs/heads/main/app/baidunetdisk/baidunetdisk.js", {${merge}}) with tag="百度网盘签到", img_url="https://raw.githubusercontent.com/MaYIHEI/pin/refs/heads/main/app/baidunetdisk.png", enable=${baidunetdisk}
+cron ${laifen_cron} then script("https://raw.githubusercontent.com/MaYIHEI/paperclip/refs/heads/main/app/laifen/laifen.js", {${merge}}) with tag="徕芬签到", img_url="https://raw.githubusercontent.com/MaYIHEI/pin/refs/heads/main/app/laifen.png", enable=${laifen}
+cron ${ppmt_cron} then script("https://raw.githubusercontent.com/MaYIHEI/paperclip/refs/heads/main/miniprogram/ppmt/ppmt.js", {${merge}}) with tag="泡泡玛特签到", img_url="https://raw.githubusercontent.com/MaYIHEI/pin/refs/heads/main/app/popmart.png", enable=${ppmt}
+cron ${tuhu_cron} then script("https://raw.githubusercontent.com/MaYIHEI/paperclip/refs/heads/main/miniprogram/tuhu/tuhu.js", {${merge}}) with tag="途虎养车签到", img_url="https://raw.githubusercontent.com/MaYIHEI/pin/refs/heads/main/app/tuhu.png", enable=${tuhu}
+cron ${haidilao_cron} then script("https://raw.githubusercontent.com/MaYIHEI/paperclip/refs/heads/main/miniprogram/haidilao/haidilao.js", {${merge}}) with tag="海底捞签到", img_url="https://raw.githubusercontent.com/MaYIHEI/pin/refs/heads/main/app/haidilao.png", enable=${haidilao}
+cron ${huisheng_cron} then script("https://raw.githubusercontent.com/MaYIHEI/paperclip/refs/heads/main/miniprogram/huisheng/huisheng.js", {${merge}}) with tag="惠省红包墙签到", img_url="https://raw.githubusercontent.com/MaYIHEI/pin/refs/heads/main/app/huisheng.png", enable=${huisheng}
+cron ${miniso_cron} then script("https://raw.githubusercontent.com/MaYIHEI/paperclip/refs/heads/main/miniprogram/miniso/miniso.js", {${merge}}) with tag="名创优品签到", img_url="https://raw.githubusercontent.com/MaYIHEI/pin/refs/heads/main/app/miniso.png", enable=${miniso}
+cron ${longde_cron} then script("https://raw.githubusercontent.com/MaYIHEI/paperclip/refs/heads/main/miniprogram/longde/longde.js", {${merge}}) with tag="龙德广场签到", img_url="https://raw.githubusercontent.com/MaYIHEI/pin/refs/heads/main/app/longde.png", enable=${longde}
+cron ${lhtj_cron} then script("https://raw.githubusercontent.com/MaYIHEI/paperclip/refs/heads/main/miniprogram/lhtj/lhtj.js", {${merge}}) with tag="龙湖天街签到", img_url="https://raw.githubusercontent.com/MaYIHEI/pin/refs/heads/main/app/lhtj.png", enable=${lhtj}
+cron ${wedome_cron} then script("https://raw.githubusercontent.com/MaYIHEI/paperclip/refs/heads/main/miniprogram/wedome/wedome.js", {${merge}}) with tag="味多美签到", img_url="https://raw.githubusercontent.com/MaYIHEI/pin/refs/heads/main/app/wedome.png", enable=${wedome}
+cron ${bhg_cron} then script("https://raw.githubusercontent.com/MaYIHEI/paperclip/refs/heads/main/miniprogram/bhg/bhg.js", {${merge}}) with tag="北京华联签到", img_url="https://raw.githubusercontent.com/MaYIHEI/pin/refs/heads/main/app/bhg.png", enable=${bhg}
+cron ${linli_cron} then script("https://raw.githubusercontent.com/MaYIHEI/paperclip/refs/heads/main/miniprogram/linli/linli.js", {${merge}}) with tag="林里签到", img_url="https://raw.githubusercontent.com/MaYIHEI/pin/refs/heads/main/app/linli.png", enable=${linli}
+cron ${teld_cron} then script("https://gist.githubusercontent.com/onshine/9cb869dc3ca5f1ada8353043053b31cc/raw/teld.js"), tag="特来电签到", img_url="https://raw.githubusercontent.com/MaYIHEI/pin/refs/heads/main/app/teld.png", timeout=60, enable=${teld}
+cron ${songshan_cron} then script("https://raw.githubusercontent.com/MaYIHEI/paperclip/refs/heads/main/miniprogram/songshan/songshan.js"), tag="松山棉店签到", img_url="https://raw.githubusercontent.com/MaYIHEI/pin/refs/heads/main/app/songshan.png", enable=${songshan}
+cron ${bibisheng_cron} then script("https://raw.githubusercontent.com/MaYIHEI/paperclip/refs/heads/main/miniprogram/bibisheng/bibisheng.js"), tag="笔笔省领券", img_url="https://raw.githubusercontent.com/MaYIHEI/pin/refs/heads/main/app/bibisheng.png", enable=${bibisheng}
+cron ${casetify_cron} then script("https://raw.githubusercontent.com/MaYIHEI/paperclip/refs/heads/main/miniprogram/casetify/casetify.js"), tag="CASETiFY签到", img_url="https://raw.githubusercontent.com/MaYIHEI/pin/refs/heads/main/app/casetify.png", enable=${casetify}
+cron ${lvcchong_cron} then script("https://raw.githubusercontent.com/MaYIHEI/paperclip/refs/heads/main/miniprogram/lvcchong/lvcchong.js"), tag="驴充充签到", img_url="https://raw.githubusercontent.com/MaYIHEI/pin/refs/heads/main/app/lvcchong.png", enable=${lvcchong}
+cron ${topsports_cron} then script("https://raw.githubusercontent.com/MaYIHEI/paperclip/refs/heads/main/miniprogram/topsports/topsports.js"), tag="滔搏签到", img_url="https://raw.githubusercontent.com/MaYIHEI/pin/refs/heads/main/app/topsports.png", enable=${topsports}

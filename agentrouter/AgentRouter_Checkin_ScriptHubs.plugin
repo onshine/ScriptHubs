@@ -1,0 +1,15 @@
+#!name=AgentRouter签到 · ScriptHubs 本地版（onshine）
+#!desc=每日自动签到，查看奖励、余额与累计消耗；多账号间随机等待 0～5 分钟。版本 r8.3（脚本本体内置在本仓库 <code>agentrouter/agentrouter.js</code>，不随上游变动）。<b>与「AgentRouter签到 · 上游原版」二选一</b>：两者开着会重复签到。需要跟 MaYIHEI 上游保持同步时改用上游原版插件。<b>更新后请删除旧插件重新添加</b>。
+#!author=773075692, MaYIHEI（脚本）· Minis（Loon 外壳）
+#!homepage=https://github.com/onshine/ScriptHubs/tree/main/agentrouter
+#!icon=https://raw.githubusercontent.com/MaYIHEI/paperclip/refs/heads/main/app/agentrouter/icon.png
+#!tag=签到
+
+[Argument]
+username = input,"",tag=账号,desc=网站账号或邮箱
+password = input,"",tag=密码,desc=网站登录密码
+accounts = input,"",tag=多账号（JSON）,desc=选填；填写后优先使用列表；格式见插件主页
+debug = switch,false,tag=调试模式,desc=仅记录请求状态和签到判定
+
+[Script]
+cron "0 9 * * *" then script("https://raw.githubusercontent.com/onshine/ScriptHubs/main/agentrouter/agentrouter.js", {${username}, ${password}, ${accounts}, ${debug}}) with tag="AgentRouter签到", img_url="https://raw.githubusercontent.com/MaYIHEI/paperclip/refs/heads/main/app/agentrouter/icon.png", timeout=1200
