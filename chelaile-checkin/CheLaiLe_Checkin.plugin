@@ -1,0 +1,27 @@
+#!name=车来了每日签到
+#!desc=车来了 App 自动签到并推送奖励结果。两条定时任务的时间都能在设置页直接改：主任务默认 00:01，兜底默认 08:05（当天已签则静默跳过）。<b>首次需先打开车来了 →「每日签到」页一次</b>抓取设备凭证；之后每天自动签到。<b>更新后请删除旧插件重新添加</b>，否则 Loon 会继续跑缓存里的旧脚本。<b>R1.0.11 起改用官方 v2 语法（cron 走参数化写法）——旧式占位符在 cron 位置不被识别，会导致定时任务静默不执行。</b>
+#!author=Minis
+#!homepage=https://github.com/onshine/ScriptHubs/tree/main/chelaile-checkin
+#!icon=https://raw.githubusercontent.com/luestr/IconResource/main/App_icon/120px/Chelaile.png
+#!tag=签到
+#!loon_version=3.5.1(983)
+
+[Argument]
+cron = input,"1 0 * * *",tag=主任务时间,desc=顺序是「分 时 日 月 周」分在前时在后。例：1 0 * * * 是每天00:01 ／ 30 8 * * * 是每天08:30 ／ 0 8,20 * * * 是每天08:00和20:00。⚠️逗号表示多个值（如 8,20 两个小时都跑）不是分隔时和分；写成 01,00 * * * * 会变成每小时跑两次
+cron_backup = input,"5 8 * * *",tag=补签兜底时间,desc=兜底补签时间（当天已签则静默跳过）。格式同上：5 8 * * * 是每天08:05。凌晨设备常被iOS挂起，这趟是保险
+udid = input,"",tag=udid,desc=一般留空，由抓包自动获取
+accountId = input,"",tag=accountId,desc=一般留空，由抓包自动获取
+secret = input,"",tag=secret,desc=一般留空，由抓包自动获取。签到接口必需，少了会报 0002
+s = input,"1",tag=s,desc=签到接口要求非空即可，默认 1
+notify_on_capture = switch,true,tag=抓到凭证时通知,desc=成功获取凭证后推送一次通知，同一个凭证只提示一次
+notify_when_signed = switch,true,tag=已签到也通知,desc=当天已签到时也推送通知
+backup_silent = switch,true,tag=兜底静默,desc=兜底那趟在当天已签时不通知，避免每天两条通知
+debug = switch,false,tag=调试日志,desc=输出接口原始响应与命中记录（已自动脱敏）
+
+[Script]
+request if ${url} ~= /^https?:\/\/(?:[a-z0-9-]+\.)*(?:chelaile\.net\.cn|chelaileapp\.cn)\/|^https?:\/\/124\.(?:70\.194\.16|71\.153\.172)\//i then script("https://raw.githubusercontent.com/onshine/ScriptHubs/main/chelaile-checkin/chelaile-checkin.js") with tag="车来了抓凭证", timeout=30
+cron ${cron} then script("https://raw.githubusercontent.com/onshine/ScriptHubs/main/chelaile-checkin/chelaile-checkin.js", {${udid}, ${accountId}, ${secret}, ${s}, ${notify_when_signed}, ${debug}}) with tag="车来了签到", timeout=300
+cron ${cron_backup} then script("https://raw.githubusercontent.com/onshine/ScriptHubs/main/chelaile-checkin/chelaile-checkin.js", {${udid}, ${accountId}, ${secret}, ${s}, ${backup_silent}, ${debug}}) with tag="车来了补签兜底", timeout=300
+
+[MitM]
+hostname = %APPEND% web.chelaile.net.cn, api.chelaile.net.cn, cdn.api.chelaile.net.cn, cdn.api.chelaileapp.cn, cdn.web.chelaile.net.cn

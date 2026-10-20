@@ -4,7 +4,7 @@
 
 - 插件：`CheLaiLe_Ads.plugin`
 - 脚本：`chelaile-ads.js`
-- 版本：**R1.0.2**
+- 版本：**R1.1.0**
 
 ---
 
@@ -209,6 +209,13 @@ JSON 解析失败、结构不符合预期、字段不存在 —— 全部 `$done
 ---
 
 ## 七、版本记录
+
+- **R1.1.0**（2026-10-14）参考社区规则 `CaoXiaoMann/XiaoMan`（车来了 7.6.6，2026-10-13 更新）补齐三处：
+  1. **yg84 改为按根域整域屏蔽**（`DOMAIN-SUFFIX, yg84.com, REJECT`）—— 原来只列了 `adx` / `ssp` / `ctrace` 三个子域，改根域后它将来加子域也跑不掉；
+  2. **补上第三方广告 SDK**：穿山甲（`pangolin-sdk-toutiao*.com`）、百度（`mobads` / `pos` / `sofire.baidu.com`）—— 这些在他的抓包里、也在本项目的 HAR 里出现过，之前我以「怕误伤其他 App」为由没加；
+  3. **补上 `feserver/vip-page/images/` 路径拦截**（7.6.6 新增的会员页推广图）。
+
+  保留自己的做法：不整体 reject `goocity/flowPos/home`（那样会连地铁、站点地图等入口一起丢掉），仍按推广特征过滤；并继续清洗 `appToggle/getStatus` 启动配置。
 
 - **R1.0.2**（2026-10-10）**修「R1.0.1 装完开屏广告照旧」**。根因是 Loon **缓存了旧版脚本**：插件里的 `[Rule]` 立即生效（`ctrace.yg84.com` 实测 61 次 → 0 次），但 `[Script]` 仍跑的是 R1.0.0（没有 ssp 处理），所以开屏素材照样下发。
   1. 开屏广告改用 **`[Rule]` 整域 REJECT**（`adx.yg84.com` + `ssp.yg84.com`），不再依赖脚本，更新插件即生效；

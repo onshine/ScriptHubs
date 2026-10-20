@@ -1,0 +1,17 @@
+#!name=PingMe 签到 + 视频奖励
+#!desc=自动完成 PingMe 签到与「看视频赚 Coins」，支持多账号（首次打开 PingMe 登录后自动抓取凭证）。脚本本体用 fmz200/wool_scripts（奶思改版），本文件只是把它整理成可安装的 Loon 插件：补上官方没给的参数声明，并把写死的签到时间改成可自定义。<b>更新后请删除旧插件重新添加</b>。
+#!author=fmz200 / 怎么肥事 / 奶思（脚本）· Minis（Loon 外壳）
+#!homepage=https://github.com/fmz200/wool_scripts/tree/main/Scripts/PingMe
+#!tag=签到
+#!loon_version=3.5.0(975)
+
+[Argument]
+PingMe = switch,true,tag=启用PingMe签到,desc=关掉后抓包与定时签到都不执行
+cron = input,"30 8,20 * * *",tag=签到时间,desc=默认每天 8:30 与 20:30 各一次，格式：分 时 日 月 周
+
+[Script]
+request if ${url} ~= /^https:\/\/api\.pingmeapp\.net\/app\/queryBalanceAndBonus/i then script("https://raw.githubusercontent.com/fmz200/wool_scripts/main/Scripts/cookie/get_cookie.js") with enable=${PingMe}, tag="PingMe获取签到参数", timeout=60
+cron ${cron} then script("https://raw.githubusercontent.com/fmz200/wool_scripts/main/Scripts/PingMe/PingMeSignin.js") with enable=${PingMe}, tag="PingMe签到", timeout=300
+
+[MitM]
+hostname = %APPEND% api.pingmeapp.net

@@ -1,5 +1,5 @@
 #!name=五种彩票近15期查询
-#!desc=分段查询双色球、大乐透、福彩3D、排列三、七乐彩最近15期开奖号码及今日开奖号码；完整结果写入运行日志，通知正文适合快速查看。
+#!desc=分段查询双色球、大乐透、福彩3D、排列三、七乐彩最近15期开奖号码及今日开奖号码；完整结果写入运行日志，通知正文适合快速查看。<b>更新后请删除旧插件重新添加</b>，否则 Loon 可能仍在运行缓存里的旧脚本。
 #!author=Minis
 #!homepage=https://github.com/onshine/ScriptHubs/tree/main/lottery-query
 #!icon=https://raw.githubusercontent.com/58xinian/icon/master/Two_color_ball.png

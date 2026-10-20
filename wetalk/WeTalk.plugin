@@ -1,0 +1,17 @@
+#!name=WeTalk 签到 + 视频奖励
+#!desc=自动完成 WeTalk 签到与「看视频赚 Coins」，支持多账号（首次打开 WeTalk 登录后自动抓取凭证）。脚本本体来自 ZenmoFeiShi/Qx（CaoXiaoMann/XiaoMan 镜像），用 chavyleung 的 Env 类，Loon 分支齐全；本文件只是补齐官方没给的 Loon 外壳，并确保签到时间可自定义。<b>更新后请删除旧插件重新添加</b>。
+#!author=ZenmoFeiShi（脚本）· Minis（Loon 外壳）
+#!homepage=https://github.com/CaoXiaoMann/XiaoMan/tree/main/Scripts/WeTalk
+#!tag=签到
+#!loon_version=3.5.0(975)
+
+[Argument]
+WeTalk = switch,true,tag=启用WeTalk签到,desc=关掉后抓包与定时签到都不执行
+cron = input,"20 8,20 * * *",tag=签到时间,desc=默认每天 8:20 与 20:20 各一次，格式：分 时 日 月 周
+
+[Script]
+request if ${url} ~= /^https:\/\/api\.wetalkapp\.com\/app\/queryBalanceAndBonus/i then script("https://raw.githubusercontent.com/CaoXiaoMann/XiaoMan/main/Scripts/WeTalk/WeTalk.js") with enable=${WeTalk}, tag="WeTalk抓账号", timeout=60
+cron ${cron} then script("https://raw.githubusercontent.com/CaoXiaoMann/XiaoMan/main/Scripts/WeTalk/WeTalk.js") with enable=${WeTalk}, tag="WeTalk签到", timeout=300
+
+[MitM]
+hostname = %APPEND% api.wetalkapp.com
