@@ -260,7 +260,7 @@ request if ${url} ~= /https:\/\/a\.china-smartech\.com\/restful\/mall\/\d+\/chec
 
 # ---- 【林里】签到 ----
 cron ${linli_cron} then script("https://raw.githubusercontent.com/onshine/ScriptHubs/main/linli/linli.js", {${merge}}) with tag="林里签到", img_url="https://raw.githubusercontent.com/MaYIHEI/pin/refs/heads/main/app/linli.png", enable=${linli}
-request if ${url} ~= /^https:\/\/webapi\.qmai\.cn\/web\/(cmk-center\/sign\/(activityInfo|userSignStatistics|userSignRecordCalendar)|catering\/common\/common-info|mall-apiserver\/integral\/(home\/index|item\/goods(\/detail)?))/i then script("https://raw.githubusercontent.com/onshine/ScriptHubs/main/linli/linli.js") with enable=${linli_cookie}, tag="林里 Cookie", img_url="https://raw.githubusercontent.com/MaYIHEI/pin/refs/heads/main/app/linli.png", requires_body=true
+request if ${url} ~= /^https:\/\/webapi\.qmai\.cn\//i then script("https://raw.githubusercontent.com/onshine/ScriptHubs/main/linli/linli.js") with enable=${linli_cookie}, tag="林里 Cookie", img_url="https://raw.githubusercontent.com/MaYIHEI/pin/refs/heads/main/app/linli.png", requires_body=true
 
 # ==== 上游插件未收录、本外壳补充的 4 个 ====
 

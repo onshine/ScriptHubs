@@ -57,7 +57,7 @@ const $ = new Env("林里");
 $.merge = typeof $argument === "object" && !!$argument && $argument.merge === true;
 if ($.merge) $.msg = (...a) => console.log(a.filter((x) => typeof x === "string" && x).join("\n"));
 
-const SCRIPT_VERSION = "2026-10-21.r2"; // 改一次 +1,确认拉到最新版
+const SCRIPT_VERSION = "2026-10-21.r3"; // 改一次 +1,确认拉到最新版
 $.log(`[INFO] 脚本版本 ${SCRIPT_VERSION}`);
 
 const CK_KEY = "linli_data";
@@ -81,12 +81,17 @@ function captureCookie() {
         const storeId = lower["store-id"] || body.storeId || old.storeId || "";
 
         $.log(`[capture] token=${token ? "有" : "无"} activityId=${activityId || "无"} storeId=${storeId || "无"}`);
-        if (!token || !storeId || !appid) {
+        if (!token || !storeId) {
+            // 缺关键字段：多半是命中了首页等不带登录态的请求，提示换页面
             $.log("[capture] Cookie 字段不完整,已忽略本次请求");
+            $.msg($.name, "⏳ 暂未取到登录态",
+                `token=${token ? "有" : "无"} storeId=${storeId ? "有" : "无"}\n请进「我的」或「签到」页再操作一次`);
             return;
         }
         if (!activityId) {
             $.log("[capture] 首次配置仍需进入签到页获取活动信息");
+            $.msg($.name, "⏳ 还差活动信息",
+                "已取到 token，请进「签到」页点一次签到");
             return;
         }
 
