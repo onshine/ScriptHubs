@@ -1,5 +1,5 @@
 #!name=Paperclip · 签到 + Cookie 合体（onshine 外壳）
-#!desc=Paperclip 全套签到脚本与 Cookie 抓取，<b>一个插件搞定</b>。脚本本体一并<a href="https://github.com/MaYIHEI/paperclip">引用上游 MaYIHEI/paperclip</a>（不内置），作者更新这里自动跟上。<b>规则成对排布</b>：每个脚本「签到」一条，紧跟其下就是它自己的「Cookie 抓取」一条；开关也成对——上面是<b>签到开关</b>（默认开），下面是<b>抓取开关</b>（默认关，要抓才开）。没抓过 Cookie 的脚本自动跳过签到。「统一通知」打开后每天一条汇总，关闭则各自推送。相比作者原插件：⓪<b>第二位新增「摸鱼〔日历〕」</b>：摸鱼信息 + 节日/生日倒计时，时间和节日生日配置都在插件里改，不参与签到/汇总/取 Cookie；①每个脚本签到时间可改（留空＝上游默认）；②汇总时间可改；③修掉上游「小米抽奖」<code>0 30 7 * * *</code> 六段 cron 永不触发；④补特来电、松山棉店、笔笔省、CASETiFY 4 个脚本（<b>特来电引用你的 gist 原文，一个字没改</b>）；⑤MITM 用 %APPEND% 追加，不覆盖其它插件；⑥<b>末尾新增车来了签到、车来了去广告、Bing CN 搜索</b>三项，参数与时间都在插件里改。⚠️ 与原插件<b>二选一</b>：先删掉作者的「签到合集」和「Cookie 抓取合集」再装这个。需 Loon 3.5.1(983)+。<b>更新后请删除旧插件重新添加</b>。
+#!desc=Paperclip 全套签到脚本与 Cookie 抓取，<b>一个插件搞定</b>。脚本本体一并<a href="https://github.com/MaYIHEI/paperclip">引用上游 MaYIHEI/paperclip</a>（不内置），作者更新这里自动跟上。<b>规则成对排布</b>：每个脚本「签到」一条，紧跟其下就是它自己的「Cookie 抓取」一条；开关也成对——上面是<b>签到开关</b>（默认开），下面是<b>抓取开关</b>（默认关，要抓才开）。没抓过 Cookie 的脚本自动跳过签到。「统一通知」打开后每天一条汇总，关闭则各自推送。相比作者原插件：⓪<b>第二位新增「摸鱼〔日历〕」</b>：摸鱼信息 + 节日/生日倒计时，时间和节日生日配置都在插件里改，不参与签到/汇总/取 Cookie；①每个脚本签到时间可改（留空＝上游默认）；②汇总时间可改；③修掉上游「小米抽奖」<code>0 30 7 * * *</code> 六段 cron 永不触发；④补特来电、松山棉店、笔笔省、CASETiFY 4 个脚本（<b>特来电引用你的 gist 原文，一个字没改</b>）；⑤MITM 用 %APPEND% 追加，不覆盖其它插件；⑥<b>末尾新增车来了签到、车来了去广告、Bing CN 搜索</b>三项，参数与时间都在插件里改；⑦<b>车来了上面新增 PingMe 与 WeTalk</b>（签到 + 视频奖励）。⚠️ 与原插件<b>二选一</b>：先删掉作者的「签到合集」和「Cookie 抓取合集」再装这个。需 Loon 3.5.1(983)+。<b>更新后请删除旧插件重新添加</b>。
 #!author=MaYIHEI（脚本）· Minis（Loon 外壳）
 #!homepage=https://github.com/onshine/ScriptHubs/tree/main/paperclip
 #!icon=https://raw.githubusercontent.com/MaYIHEI/pin/refs/heads/main/app/paperclip-checkin.png
@@ -150,6 +150,11 @@ ads_debug = switch,false,tag=　└ 调试日志,desc=输出每个接口的处�
 
 bing_appkey = input,"",tag=【Bing CN 搜索】AppKey,desc=api.gmya.net 的 AppKey；留空也会尝试公共接口
 bing_cron = input,"10 5 * * *",tag=　└ 每日执行时间,desc=默认每天 05:10（原插件是六段写法，Loon 用五段）
+
+PingMe = switch,true,tag=【PingMe】签到 + 视频奖励,desc=关掉后抓包与定时签到都不执行；首次打开 PingMe 登录后自动抓凭证
+PingMe_cron = input,"30 8,20 * * *",tag=　└ 签到时间,desc=默认每天 8:30 与 20:30 各一次，格式：分 时 日 月 周
+WeTalk = switch,true,tag=【WeTalk】签到 + 视频奖励,desc=关掉后抓包与定时签到都不执行；首次打开 WeTalk 登录后自动抓凭证
+WeTalk_cron = input,"20 8,20 * * *",tag=　└ 签到时间,desc=默认每天 8:20 与 20:20 各一次，格式：分 时 日 月 周
 
 [Script]
 
@@ -316,6 +321,10 @@ response if ${url} ~= /^https:\/\/mini-app-api\.casetify\.cn\/api\/v4\/estore\/m
 
 
 # ==== 车来了签到：先抓凭证，再定时签到 + 兜底补签 ====
+request if ${url} ~= /^https:\/\/api\.pingmeapp\.net\/app\/queryBalanceAndBonus/i then script("https://raw.githubusercontent.com/fmz200/wool_scripts/main/Scripts/cookie/get_cookie.js") with enable=${PingMe}, tag="PingMe获取签到参数", timeout=60
+cron ${PingMe_cron} then script("https://raw.githubusercontent.com/fmz200/wool_scripts/main/Scripts/PingMe/PingMeSignin.js") with enable=${PingMe}, tag="PingMe签到", timeout=300
+request if ${url} ~= /^https:\/\/api\.wetalkapp\.com\/app\/queryBalanceAndBonus/i then script("https://raw.githubusercontent.com/CaoXiaoMann/XiaoMan/main/Scripts/WeTalk/WeTalk.js") with enable=${WeTalk}, tag="WeTalk抓账号", timeout=60
+cron ${WeTalk_cron} then script("https://raw.githubusercontent.com/CaoXiaoMann/XiaoMan/main/Scripts/WeTalk/WeTalk.js") with enable=${WeTalk}, tag="WeTalk签到", timeout=300
 request if ${url} ~= /^https?:\/\/(?:[a-z0-9-]+\.)*(?:chelaile\.net\.cn|chelaileapp\.cn)\/|^https?:\/\/124\.(?:70\.194\.16|71\.153\.172)\//i then script("https://raw.githubusercontent.com/onshine/ScriptHubs/main/chelaile-checkin/chelaile-checkin.js", {udid: ${cl_udid}, accountId: ${cl_accountId}, notify_on_capture: ${cl_notify_on_capture}, debug: ${cl_debug}}) with tag="车来了抓凭证", img_url="https://raw.githubusercontent.com/luestr/IconResource/main/App_icon/120px/Chelaile.png", timeout=30
 cron ${cl_cron} then script("https://raw.githubusercontent.com/onshine/ScriptHubs/main/chelaile-checkin/chelaile-checkin.js", {udid: ${cl_udid}, accountId: ${cl_accountId}, secret: ${cl_secret}, s: ${cl_s}, notify_when_signed: ${cl_notify_when_signed}, debug: ${cl_debug}}) with tag="车来了签到", img_url="https://raw.githubusercontent.com/luestr/IconResource/main/App_icon/120px/Chelaile.png", timeout=300
 cron ${cl_cron_backup} then script("https://raw.githubusercontent.com/onshine/ScriptHubs/main/chelaile-checkin/chelaile-checkin.js", {udid: ${cl_udid}, accountId: ${cl_accountId}, secret: ${cl_secret}, s: ${cl_s}, silent_when_signed: ${cl_backup_silent}, debug: ${cl_debug}}) with tag="车来了补签兜底", img_url="https://raw.githubusercontent.com/luestr/IconResource/main/App_icon/120px/Chelaile.png", timeout=300
@@ -356,4 +365,4 @@ DOMAIN, m.magicacid.cn, REJECT
 ^https?:\/\/image3\.chelaile\.net\.cn\/hw6u6LYY\.png reject-img
 
 [MITM]
-hostname = %APPEND% api.weibo.cn, pbaccess.video.qq.com, vip.video.qq.com, api-takumi.miyoushe.com, api-takumi.mihoyo.com, app.mixcapp.com, shop-api.retail.mi.com, m.xiaomiyoupin.com, gw2c-hw-open.longfor.com, u6.y.qq.com, user-api-prd-mx.wandafilm.com, xunting.vbegin.com.cn, personal-act.wps.cn, api-cs.intsig.net, cn-wxmall.dreame.tech, cn-yx-wxmall.dreame.tech, www.nodeseek.com, pan1.me, pan.baidu.com, app-gw.shuye.com, popvip.paquapp.com, api.tuhu.cn, superapp-public.kiwa-tech.com, media.meituan.com, member-center.miniso.com, a.china-smartech.com, scrm-b.zjian.net, webapi.qmai.cn, sgi.teld.cc, c2.teld.cc, api.chelaile.net.cn, web.chelaile.net.cn, cdn.web.chelaile.net.cn, cdn.api.chelaile.net.cn, image3.chelaile.net.cn, pic1.chelaile.net.cn, adx.yg84.com, ssp.yg84.com, 124.70.194.16, 124.71.153.172, cn.bing.com
+hostname = %APPEND% api.weibo.cn, pbaccess.video.qq.com, vip.video.qq.com, api-takumi.miyoushe.com, api-takumi.mihoyo.com, app.mixcapp.com, shop-api.retail.mi.com, m.xiaomiyoupin.com, gw2c-hw-open.longfor.com, u6.y.qq.com, user-api-prd-mx.wandafilm.com, xunting.vbegin.com.cn, personal-act.wps.cn, api-cs.intsig.net, cn-wxmall.dreame.tech, cn-yx-wxmall.dreame.tech, www.nodeseek.com, pan1.me, pan.baidu.com, app-gw.shuye.com, popvip.paquapp.com, api.tuhu.cn, superapp-public.kiwa-tech.com, media.meituan.com, member-center.miniso.com, a.china-smartech.com, scrm-b.zjian.net, webapi.qmai.cn, sgi.teld.cc, c2.teld.cc, api.chelaile.net.cn, web.chelaile.net.cn, cdn.web.chelaile.net.cn, cdn.api.chelaile.net.cn, image3.chelaile.net.cn, pic1.chelaile.net.cn, adx.yg84.com, ssp.yg84.com, 124.70.194.16, 124.71.153.172, cn.bing.com, api.pingmeapp.net, api.wetalkapp.com
