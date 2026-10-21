@@ -1,9 +1,9 @@
 // 摸鱼来啦 · Loon 外壳（ScriptHubs 版）
-// 脚本版本：R1.0.1（见下方 SCRIPT_VERSION，须与本行一致）
+// 脚本版本：R1.1.0（见下方 SCRIPT_VERSION，须与本行一致）
 // 上游原作：Yuheng0101/X Tasks/moyu.js v1.3.2（@yuheng），本版在其基础上修复农历生日、跨年与假期排版
 // 内置依赖：6tail/lunar-javascript 1.7.7（MIT License，Copyright (c) 2018 6tail）
 // 仓库：https://github.com/onshine/ScriptHubs ；原脚本免责声明：仅供学习研究，禁止商业用途
-// 版本：R1.0.1
+// 版本：R1.1.0
 
 // ===== moyu:lunar:start =====
 let Calendar = (function () {
@@ -17,10 +17,12 @@ const SETTINGS_ICON = "https://is1-ssl.mzstatic.com/image/thumb/Purple126/v4/67/
 
 // 脚本内部已内置农历库；外层 declare 只是为了保持表达式独立、便于检查语法
 
-const SCRIPT_VERSION = "R1.0.1";
+const SCRIPT_VERSION = "R1.1.0";
 const UPSTREAM = "https://github.com/Yuheng0101/X/blob/main/Tasks/moyu.js";
 const DEFAULT_FESTIVALS = "<元宵节>&<清明节>&<劳动节>&<端午节>&<中秋节>&<国庆节>&<元旦>&<春节>&<母亲节>&<儿童节>&<父亲节>&<七夕节>&<情人节>";
 const DAY_MS = 86400000;
+var EMOJI_RE = new RegExp("[\\u2600-\\u27bf\\u{1f300}-\\u{1faff}]\\uFE0F?", "gu");
+var EMOJI_HEAD_RE = new RegExp("^[\\u2600-\\u27bf\\u{1f300}-\\u{1faff}]\\uFE0F?", "u");
 const DEFAULT_ICON = "https://is1-ssl.mzstatic.com/image/thumb/Purple126/v4/67/04/ff/6704ff4c-b49b-de91-70ac-201c62d5296f/AppIcon-0-0-1x_U007emarketing-0-0-0-5-0-0-sRGB-60x60@2x.png/60x60bb.png";
 const { Solar, Lunar, LunarMonth, SolarUtil } = Calendar;
 
@@ -79,7 +81,9 @@ function parseEvent(input) {
   }
   const colon = entry.indexOf(":") >= 0 ? entry.indexOf(":") : entry.indexOf("：");
   if (colon < 1) throw new Error("自定义节日须填写 名称:日期");
-  const name = entry.slice(0, colon).trim();
+  const rawName = entry.slice(0, colon).trim();
+  const iconHit = rawName.match(EMOJI_HEAD_RE);
+  const name = iconHit ? rawName.replace(iconHit[0], "").trim() : rawName;
   const tail = entry.slice(colon + 1).trim();
   if (!tail) throw new Error(name + "：日期为空");
   // 日期（可带 $农历/$阳历 标记与 #祝福）整体取出来，其余 $ 段一律当历法标记或注释
@@ -101,7 +105,7 @@ function parseEvent(input) {
   if (month < 1 || month > 12 || day < 1 || day > (kind === "lunar" ? 30 : 31)) throw new Error(name + "：月日超出范围");
   if (kind === "solar" && (match[2] || day > SolarUtil.getDaysOfMonth(2000, month))) throw new Error(name + "：公历日期不存在");
   if (birthYear !== null && (birthYear < 1900 || birthYear > 2099)) throw new Error(name + "：出生年须在 1900～2099");
-  return { name, kind, month, day, leap: !!match[2], birthYear, text: notes[0] || "",
+  return { name, icon: iconHit ? iconHit[0] : "", kind, month, day, leap: !!match[2], birthYear, text: notes[0] || "",
     dual: labels.length > 1 && labels.some(v => v !== kind) };
 }
 function lunarCandidate(event, year, options) {
@@ -270,6 +274,12 @@ function selectEvents(config, today, remindDays, options = {}) {
   return { events: events.sort((a, b) => a.diff - b.diff || dayIndex(a.date) - dayIndex(b.date)), errors };
 }
 
+// 展示用 emoji：只影响通知里怎么显示，不影响 <名称> 的匹配
+var EMOJI_TABLE = {"元旦":"🎊","情人节":"💘","妇女节":"🌸","植树节":"🌳","愚人节":"🤡","清明节":"🌱","劳动节":"🛠️","青年节":"🧑‍🎓","母亲节":"🌷","儿童节":"🍭","父亲节":"👔","建军节":"🎖️","教师节":"📚","国庆节":"🎆","平安夜":"🕯️","圣诞节":"🎄","春节":"🧨","元宵节":"🏮","龙抬头":"🐉","端午节":"🥟","七夕节":"💞","中元节":"🕯","中秋节":"🌕","重阳节":"⛰️","腊八节":"🥣","北方小年":"🍬","南方小年":"🍬","除夕":"🎇"};
+function emojiOf(name) {
+  var clean = String(name || "").replace(EMOJI_RE, "").trim();
+  return EMOJI_TABLE[clean] || "";
+}
 function weekdayText(p) {
   return "星期" + "日一二三四五六"[new Date(Date.UTC(p.year, p.month - 1, p.day)).getUTCDay()];
 }
@@ -313,13 +323,13 @@ function notificationText(selected, settings, ctx) {
   lines.push((weekend.days > 0 ? "距离周末还有" + weekend.days + "天" + (weekend.days < 3 ? "🥰" : "🫤") : "") + weekend.quote);
   if (selected.length === 0) lines.push(settings.days + " 天内暂无节日");
   for (const e of selected) {
-    const head = e.diff === 0 ? "今天就是" + e.name : "距离" + e.name + "还有" + e.diff + "天";
-    const detail = e.diff === 0
-      ? "（" + e.iso + " " + weekdayText(e.date) + (e.iso !== e.trueDate ? "；节日为" + e.trueDate : "") + "）"
-      : "（" + e.iso + " " + weekdayText(e.date) + "，" + e.label + (e.iso !== e.trueDate ? "；节日为" + e.trueDate : "") + "）";
-    lines.push(head + detail);
-    if (e.diff === 0 && e.text) lines.push("  " + e.text);
-    if (e.note) lines.push("  " + e.note);
+    if (lines.length) lines.push("");
+    const icon = e.icon || emojiOf(e.name);
+    const title = icon ? icon + " " + e.name : e.name;
+    lines.push(e.diff === 0 ? "🎉 今天就是 " + title : title + " · 还有 " + e.diff + " 天");
+    lines.push("🗓 " + e.iso + " " + weekdayText(e.date) + (e.label ? " · " + e.label : "") + (e.iso !== e.trueDate ? "（节日为 " + e.trueDate + "）" : ""));
+    if (e.diff === 0 && e.text) lines.push("💬 " + e.text);
+    if (e.note) lines.push("ℹ️ " + e.note);
   }
   if (settings.almanac) {
     const yi = lunar.getDayYi(), ji = lunar.getDayJi(), jq = lunar.getJieQi();
