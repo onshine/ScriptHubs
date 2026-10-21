@@ -64,12 +64,23 @@ request if ${url} ~= /…api\.weibo\.cn…/i then script("…/weibotalk.cookie.j
 
 **AgentRouter**
 
-| 设置项 | 说明 |
-|---|---|
-| `　└ 账号` | 网站账号或邮箱 |
-| `　└ 密码` | 网站登录密码 |
-| `　└ 多账号（JSON）` | 选填，**填了优先用列表**：`[{"username":"a@b.com","password":"x"},{"username":"c@d.com","password":"y"}]` |
-| `　└ 调试日志` | 在 Loon 日志里打印请求状态与签到判定 |
+> ⚠️ 参数名必须与脚本一致：`username` / `password` / `accounts` / `debug`。
+
+| 设置项 | 参数名 | 说明 |
+|---|---|---|
+| `　└ 账号` | `username` | 网站账号或邮箱（单账号时填） |
+| `　└ 密码` | `password` | 网站登录密码 |
+| `　└ 多账号 JSON` | `accounts` | 选填，**填了优先用列表** |
+| `　└ 调试日志` | `debug` | 在 Loon 日志里打印请求状态与签到判定 |
+
+多账号 JSON 格式（**必须是数组，键名是 `username` / `password`**）：
+
+```json
+[{"username":"a@b.com","password":"x"},{"username":"c@d.com","password":"y"}]
+```
+
+单账号就填「账号 + 密码」，多账号 JSON 留空。
+**两者都不填会报「🚫 未配置账号」**。
 
 **网上国网**
 
