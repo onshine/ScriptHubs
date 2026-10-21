@@ -1,9 +1,9 @@
 // 摸鱼来啦 · Loon 外壳（ScriptHubs 版）
-// 脚本版本：R1.1.0（见下方 SCRIPT_VERSION，须与本行一致）
+// 脚本版本：R1.1.1（见下方 SCRIPT_VERSION，须与本行一致）
 // 上游原作：Yuheng0101/X Tasks/moyu.js v1.3.2（@yuheng），本版在其基础上修复农历生日、跨年与假期排版
 // 内置依赖：6tail/lunar-javascript 1.7.7（MIT License，Copyright (c) 2018 6tail）
 // 仓库：https://github.com/onshine/ScriptHubs ；原脚本免责声明：仅供学习研究，禁止商业用途
-// 版本：R1.1.0
+// 版本：R1.1.1
 
 // ===== moyu:lunar:start =====
 let Calendar = (function () {
@@ -17,7 +17,7 @@ const SETTINGS_ICON = "https://is1-ssl.mzstatic.com/image/thumb/Purple126/v4/67/
 
 // 脚本内部已内置农历库；外层 declare 只是为了保持表达式独立、便于检查语法
 
-const SCRIPT_VERSION = "R1.1.0";
+const SCRIPT_VERSION = "R1.1.1";
 const UPSTREAM = "https://github.com/Yuheng0101/X/blob/main/Tasks/moyu.js";
 const DEFAULT_FESTIVALS = "<元宵节>&<清明节>&<劳动节>&<端午节>&<中秋节>&<国庆节>&<元旦>&<春节>&<母亲节>&<儿童节>&<父亲节>&<七夕节>&<情人节>";
 const DAY_MS = 86400000;
@@ -280,6 +280,29 @@ function emojiOf(name) {
   var clean = String(name || "").replace(EMOJI_RE, "").trim();
   return EMOJI_TABLE[clean] || "";
 }
+// 星座运势：同一天每个人看到的都一样（按日期取种子），换天会变
+var ZODIAC_EMOJI = { 白羊: "♈", 金牛: "♉", 双子: "♊", 巨蟹: "♋", 狮子: "♌", 处女: "♍", 天秤: "♎", 天蝎: "♏", 射手: "♐", 摩羯: "♑", 水瓶: "♒", 双鱼: "♓" };
+var HOROSCOPE = {
+  运势: ["稳中有进，按计划推进就好", "小有波折，别急着做决定", "顺风顺水，适合谈事情", "平平稳稳，适合把手头的事收尾", "有点忙，但都在掌控之内"],
+  爱情: ["适合主动一点，别憋着", "多一点耐心，对方也在观察你", "气氛不错，适合聊聊近况", "各忙各的，晚上记得说句晚安", "适合一起吃点好吃的"],
+  事业: ["思路清晰，适合处理难题", "适合沟通协作，别一个人扛", "按部就班就好，别揽新活", "有新的想法，可以先记下来", "容易被临时打断，留点弹性"],
+  财运: ["不宜冲动消费", "小额支出可以有，别大手大脚", "有进账的机会，留意消息", "保持现状，别折腾", "适合整理账单"],
+  健康: ["注意作息，别熬夜", "多喝水，肩颈放松一下", "适合散步，别久坐", "胃口不错，少吃点辣的", "精神不错，保持运动"]
+};
+function horoscopeOf(today) {
+  const seed = dayIndex(today);
+  const pick = (list, salt) => {
+    let x = Math.abs(Math.sin(seed * 9301 + salt * 49297) * 233280) % list.length;
+    return list[Math.floor(x)];
+  };
+  return [
+    "运势 " + pick(HOROSCOPE.运势, 1),
+    "爱情 " + pick(HOROSCOPE.爱情, 2),
+    "事业 " + pick(HOROSCOPE.事业, 3),
+    "财运 " + pick(HOROSCOPE.财运, 4),
+    "健康 " + pick(HOROSCOPE.健康, 5)
+  ];
+}
 function weekdayText(p) {
   return "星期" + "日一二三四五六"[new Date(Date.UTC(p.year, p.month - 1, p.day)).getUTCDay()];
 }
@@ -333,9 +356,13 @@ function notificationText(selected, settings, ctx) {
   }
   if (settings.almanac) {
     const yi = lunar.getDayYi(), ji = lunar.getDayJi(), jq = lunar.getJieQi();
-    if (yi.length) lines.push("宜: " + yi.join("、"));
-    if (ji.length) lines.push("忌: " + ji.join("、"));
-    if (jq) lines.push("节气: " + jq);
+    if (yi.length) { lines.push(""); lines.push("🟢 宜"); lines.push(yi.join("、")); }
+    if (ji.length) { lines.push(""); lines.push("🔴 忌"); lines.push(ji.join("、")); }
+    if (jq) { lines.push(""); lines.push("🌤 节气 · " + jq); }
+    const zodiac = solar.getXingZuo();
+    lines.push("");
+    lines.push("🔮 " + (ZODIAC_EMOJI[zodiac] || "🔮") + " 今日运势 · " + zodiac + "座");
+    horoscopeOf(today).forEach(v => lines.push("· " + v));
   }
   return { title, body: lines.join("\n"), lunar: "农历" + lunar.getMonthInChinese() + "月" + lunar.getDayInChinese() };
 }
