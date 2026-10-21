@@ -1,9 +1,9 @@
 // 摸鱼来啦 · Loon 外壳（ScriptHubs 版）
-// 脚本版本：R1.0.0（见下方 SCRIPT_VERSION，须与本行一致）
+// 脚本版本：R1.0.1（见下方 SCRIPT_VERSION，须与本行一致）
 // 上游原作：Yuheng0101/X Tasks/moyu.js v1.3.2（@yuheng），本版在其基础上修复农历生日、跨年与假期排版
 // 内置依赖：6tail/lunar-javascript 1.7.7（MIT License，Copyright (c) 2018 6tail）
 // 仓库：https://github.com/onshine/ScriptHubs ；原脚本免责声明：仅供学习研究，禁止商业用途
-// 版本：R1.0.0
+// 版本：R1.0.1
 
 // ===== moyu:lunar:start =====
 let Calendar = (function () {
@@ -17,7 +17,7 @@ const SETTINGS_ICON = "https://is1-ssl.mzstatic.com/image/thumb/Purple126/v4/67/
 
 // 脚本内部已内置农历库；外层 declare 只是为了保持表达式独立、便于检查语法
 
-const SCRIPT_VERSION = "R1.0.0";
+const SCRIPT_VERSION = "R1.0.1";
 const UPSTREAM = "https://github.com/Yuheng0101/X/blob/main/Tasks/moyu.js";
 const DEFAULT_FESTIVALS = "<元宵节>&<清明节>&<劳动节>&<端午节>&<中秋节>&<国庆节>&<元旦>&<春节>&<母亲节>&<儿童节>&<父亲节>&<七夕节>&<情人节>";
 const DAY_MS = 86400000;
@@ -273,11 +273,44 @@ function selectEvents(config, today, remindDays, options = {}) {
 function weekdayText(p) {
   return "星期" + "日一二三四五六"[new Date(Date.UTC(p.year, p.month - 1, p.day)).getUTCDay()];
 }
+const WEEKEND_LINES = [
+  "周末模式已启动⏸️ 奶茶、追剧、被窝，快乐三件套安排！好好放松，充电满格～",
+  "终于等到周末啦🎉 关掉闹钟，卸下疲惫，今天的任务就是开心到模糊！",
+  "阳光正好，微风不燥🌞 周末就是用来浪费的！睡到自然醒，快乐不打折～",
+  "周末的正确打开方式：瘫着、笑着、吃着🍟 烦恼统统退退退！",
+  "周末的快乐，是懒觉的自由，是美食的治愈，是啥也不做的惬意🥰 好好享受！",
+  "忙碌暂停，快乐充值💳 周末到，愿你吹着风，哼着歌，把生活调成自己喜欢的频道～",
+  "周末啦！约上好友，奔赴一场日落，把一周的疲惫都抛进晚风里🌇",
+  "叮！周末快递已送达📦 内含双倍快乐，签收后请尽情享用～",
+  "周末的意义，大概就是把“改天”“下次”“有空”都变成“今天就现在”🍹",
+  "生活按下慢放键⏯️ 周末躺平发呆，也是对忙碌一周的温柔犒劳！",
+  "周末警报拉响！请立即切换到“躺平摸鱼”或“撒欢儿模式”，快乐不设限～",
+  "把周一到周五的烦恼打包📦 趁着周末清空回收站，重启好心情～",
+  "周末时光已上线🌿 咖啡配阳光，书本配躺椅，虚度光阴也超棒～",
+  "周末是生活的“解压包”，解压密码是：睡到自然醒 + 奶茶自由 + 好友畅聊～"
+];
+const WEEKDAY_LINES = {
+  星期一: "周一周一，奄奄一息(",
+  星期二: "周二摆烂，啥也不干",
+  星期三: "周三划水，给加薪水",
+  星期四: "周四不倦，卧倒消遣",
+  星期五: "周五一到，快乐冒泡)"
+};
+// 周末倒计时：按北京时间的星期几算，星期天算 0 天，工作日为 6 - 星期几
+function weekendInfo(today) {
+  const week = new Date(Date.UTC(today.year, today.month - 1, today.day)).getUTCDay();
+  const days = week === 0 ? 0 : 6 - week;
+  const text = WEEKDAY_LINES["星期" + "日一二三四五六"[week]] || "";
+  const quote = days === 0 ? WEEKEND_LINES[Math.floor(Math.random() * WEEKEND_LINES.length)] : text;
+  return { days, quote };
+}
 function notificationText(selected, settings, ctx) {
   const today = ctx.today;
   const solar = Solar.fromYmd(today.year, today.month, today.day), lunar = solar.getLunar();
   const title = "【来摸鱼啦】" + today.month + "月" + today.day + "日 农历" + lunar.getMonthInChinese() + "月" + lunar.getDayInChinese();
   const lines = [];
+  const weekend = weekendInfo(today);
+  lines.push((weekend.days > 0 ? "距离周末还有" + weekend.days + "天" + (weekend.days < 3 ? "🥰" : "🫤") : "") + weekend.quote);
   if (selected.length === 0) lines.push(settings.days + " 天内暂无节日");
   for (const e of selected) {
     const head = e.diff === 0 ? "今天就是" + e.name : "距离" + e.name + "还有" + e.diff + "天";

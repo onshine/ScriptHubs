@@ -2,7 +2,7 @@
 
 每日一条「摸鱼」通知：今天几号、农历几月几日、距离周末 / 节日 / 生日还有几天，可选带黄历和节日祝福。
 
-- **脚本版本：R1.0.0**
+- **脚本版本：R1.0.1**
 - 安装地址（插件）：`https://raw.githubusercontent.com/onshine/ScriptHubs/main/moyu/Moyu.plugin`
 - 上游原作：`Yuheng0101/X` → `Tasks/moyu.js` v1.3.2（@yuheng）
 - 农历换算：内置 `6tail/lunar-javascript` 1.7.7（MIT）
@@ -92,4 +92,5 @@ node selftest.js        # 期望 pass=28 fail=0
 
 | 版本 | 说明 |
 |---|---|
+| R1.0.1 | 补回上游的「距离周末还有 N 天」与周末/工作日文案（R1.0.0 重写通知时漏掉了），按北京时间星期几计算 |
 | R1.0.0 | 首个 ScriptHubs 版：修复农历生日换算、跨春节、29 天月、闰月、2/29、假期顺延与当天祝福；新增插件内直接配置 |
