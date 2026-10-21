@@ -31,12 +31,12 @@ function next(date, config, days = 400) {
 }
 
 // 用户六个农历生日：只按农历月日循环，与出生年无关；跨春节不回退
-eq("lunar 10/27", next(day(2026,10,21), "A生日:1994年10月27日$农历#祝福A"), [["A生日","2026-12-05",45,2026]]);
-eq("lunar 9/11 passed today -> next year", next(day(2026,10,21), "B生日:1964年9月11日$农历"), [["B生日","2027-10-10",354,2027]]);
-eq("lunar 12/28 rolls over CNY", next(day(2026,10,21), "C生日:1969年12月28日$农历"), [["C生日","2027-02-04",106,2026]]);
-eq("lunar 1/26 after CNY", next(day(2026,10,21), "D生日:1991年1月26日$农历"), [["D生日","2027-03-03",133,2027]]);
-eq("lunar 3/26", next(day(2026,10,21), "E生日:2018年3月26日$农历"), [["E生日","2027-05-02",193,2027]]);
-eq("lunar 7/7", next(day(2026,10,21), "F生日:1949年7月7日$农历"), [["F生日","2027-08-08",291,2027]]);
+eq("lunar 10/27", next(day(2026,10,21), "A:10月27日$农历#祝福A"), [["A","2026-12-05",45,2026]]);
+eq("lunar 9/11 passed today -> next year", next(day(2026,10,21), "B:9月11日$农历"), [["B","2027-10-10",354,2027]]);
+eq("lunar 12/28 rolls over CNY", next(day(2026,10,21), "C:12月28日$农历"), [["C","2027-02-04",106,2026]]);
+eq("lunar 1/26 after CNY", next(day(2026,10,21), "D:1月26日$农历"), [["D","2027-03-03",133,2027]]);
+eq("lunar 3/26", next(day(2026,10,21), "E:3月26日$农历"), [["E","2027-05-02",193,2027]]);
+eq("lunar 7/7", next(day(2026,10,21), "F:7月7日$农历"), [["F","2027-08-08",291,2027]]);
 eq("birth year must not matter", next(day(2026,10,21), "G:2001年9月11日$农历"), next(day(2026,10,21), "G:17年9月11日$农历"));
 eq("no year = this lunar month", next(day(2026,10,21), "H:9月11日$农历"), next(day(2026,10,21), "H:2026年9月11日$农历"));
 // 春节前后跨农历年（2026 春节 = 2026-02-17，2027 春节 = 2027-02-06，均有 8 天假期）
@@ -62,7 +62,7 @@ eq("new year pre-holiday", next(day(2026,12,1), "<元旦>"), [["元旦","2027-01
 // 双历法、错误容错、通知文案
 eq("dual calendars", E.selectEvents("生日:1990年3月14日$阳历$农历", day(2026,10,21), 400).events.map(e => e.name), ["生日","生日（农历）"]);
 eq("bad entries do not break others", (() => { const r = E.selectEvents("<不存在的节>&坏的&<春节>", day(2026,10,21), 400); return [r.errors.length, r.events.map(e => e.name)]; })(), [2,["春节"]]);
-const nt = E.notificationText(E.selectEvents("<春节>&老婆生日:1994年10月27日$农历#祝老婆生日快乐", day(2027,2,6), 400).events, { days: 400, almanac: false }, { today: day(2027,2,6) });
+const nt = E.notificationText(E.selectEvents("<春节>&A:10月27日$农历#祝福A", day(2027,2,6), 400).events, { days: 400, almanac: false }, { today: day(2027,2,6) });
 eq("notification title", /^【来摸鱼啦】2月6日 农历正月初一$/.test(nt.title), true);
 eq("notification today line", /今天就是春节/.test(nt.body), true);
 eq("notification shows lunar date", /农历十月廿七/.test(nt.body), true);
