@@ -20,6 +20,7 @@ Loon / Quantumult X / Surge 签到与定时脚本合集。
 - [chelaile-checkin](chelaile-checkin/) — 车来了每日签到（Loon 插件）。R1.0.7，`signin` 与 `config` 鉴权不同：签到**必须**带 `secret` + `s`（只带 `udid`+`accountId` 一律 `0002 非法请求`）；`signature`/`nonce`/`h5TimeStamp` 服务端并不校验。`http-request` 钩子自动抓凭证 + cron 签到，按 `signDate` 判断当日是否已签；日志与通知里的凭证一律脱敏。
 - [sub-store-deploy](sub-store-deploy/) — 自建 Sub-Store 部署套件。R1.0.0，`sub-store.sh` 一键部署/更新，默认写好前后端同源路径与 CORS 白名单（治「网页端 403 CORS origin not allowed / 列表空白」），含端口链、前端路径、CORS 实测自检。
 - [paperclip](paperclip/) — Paperclip 全套签到脚本的 **Loon 外壳（签到 + 取 Cookie 合一，单插件）**。R1.1.0，脚本本体引用上游 `MaYIHEI/paperclip`（不内置）；**每条签到规则下面紧跟它自己的 Cookie 抓取规则**，上开关管签到（默认开）、下开关管抓取（默认关）。每个脚本签到时间可改、汇总时间可改，修掉上游小米抽奖六段 cron 永不触发，MITM 改 `%APPEND%` 不覆盖其它插件，补特来电（gist 原文未改）、松山棉店、笔笔省、CASETiFY。⚠️ 与作者原插件二选一。
+- [moyu](moyu/) — 摸鱼来啦（每日摸鱼通知）的 **Loon 外壳**。R1.0.0，脚本基于上游 `Yuheng0101/X` 的 `Tasks/moyu.js` v1.3.2，**修好了农历生日**：原来会把出生年的农历直接套到今年（实际按公历提醒），跨春节的腊月/正月生日还会整年错位或漏掉；本版每年按农历月日重新换算，并处理 29 天月份、闰月缺失、公历 2/29、节日撞法定假期，内置农历库 `lunar-javascript` 1.7.7（MIT）。配置可在插件里直接填（BoxJS 同名 key 仍兼容）。
 
 ## 使用
 
