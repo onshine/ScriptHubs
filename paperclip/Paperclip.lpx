@@ -7,7 +7,7 @@
 #!loon_version=3.5.1(983)
 
 [Argument]
-merge = switch,false,tag=【统一通知】每天一条汇总,desc=打开后各脚本不再单独弹通知，按「汇总时间」统一发一条；关闭则各自推送
+merge = switch,true,tag=【统一通知】每天一条汇总,desc=打开后各脚本不再单独弹通知，按「汇总时间」统一发一条；关闭则各自推送
 summary_cron = input,"0 7 * * *",tag=　└ 汇总时间,desc=默认 0 7 * * *（最后一个签到 6:48 之后）
 moyu_festival_conf = input,"<元宵节>&<清明节>&<劳动节>&<端午节>&<中秋节>&<国庆节>&<元旦>&<春节>&<母亲节>&<儿童节>&<父亲节>&<七夕节>&<情人节>",tag=【摸鱼来啦】〔日历〕节日与生日倒计时,desc=用 & 分隔：内置节日写 <名称>，自定义写 名称:日期$农历或$阳历，当天祝福用 # 接在后面；农历生日每年按农历换算。示例：某人生日:10月27日$农历#生日快乐
 moyu = switch,false,tag=【摸鱼来啦】〔日历〕开关,desc=默认关闭；打开后每天推送摸鱼信息、农历日期与节日/生日倒计时
@@ -15,117 +15,117 @@ moyu_cron = input,"09 5 * * *",tag=　└ 执行时间,desc=默认 09 5 * * *，
 moyu_remind_days = input,"50",tag=　└ 提前多少天提醒,desc=0～3660 的整数，默认 50
 ssq = switch,true,tag=【彩票查询】双色球等近5种彩票,desc=每晚 21:30 推送最近 15 期 + 今日开奖号码；不需要可关掉
 ssq_cron = input,"30 21 * * *",tag=　└ 执行时间,desc=默认 30 21 * * *（开奖后半小时），可改
-weibotalk = switch,false,tag=【微博超话】签到,desc=签到开关，默认 00 5 * * *
+weibotalk = switch,true,tag=【微博超话】签到,desc=签到开关，默认 00 5 * * *
 weibotalk_cookie = switch,false,tag=　└ 取 Cookie,desc=要抓时才开；抓完关掉
 weibotalk_cron = input,"00 5 * * *",tag=　└ 签到时间,desc=默认 00 5 * * *，可改
-tenvideo = switch,false,tag=【腾讯视频】签到,desc=签到开关，默认 03 5 * * *
+tenvideo = switch,true,tag=【腾讯视频】签到,desc=签到开关，默认 03 5 * * *
 tenvideo_cookie = switch,false,tag=　└ 取 Cookie,desc=要抓时才开；抓完关掉
 tenvideo_cron = input,"03 5 * * *",tag=　└ 签到时间,desc=默认 03 5 * * *，可改
-mihoyo = switch,false,tag=【米游社】签到,desc=签到开关，默认 06 5 * * *
+mihoyo = switch,true,tag=【米游社】签到,desc=签到开关，默认 06 5 * * *
 mihoyo_cookie = switch,false,tag=　└ 取 Cookie,desc=要抓时才开；抓完关掉
 mihoyo_cron = input,"06 5 * * *",tag=　└ 签到时间,desc=默认 06 5 * * *，可改
-newmixc = switch,false,tag=【一点万象】签到,desc=签到开关，默认 09 5 * * *
+newmixc = switch,true,tag=【一点万象】签到,desc=签到开关，默认 09 5 * * *
 newmixc_cookie = switch,false,tag=　└ 取 Cookie,desc=要抓时才开；抓完关掉
 newmixc_cron = input,"09 5 * * *",tag=　└ 签到时间,desc=默认 09 5 * * *，可改
-mishop = switch,false,tag=【小米商城】签到,desc=签到开关，默认 12 5 * * *
+mishop = switch,true,tag=【小米商城】签到,desc=签到开关，默认 12 5 * * *
 mishop_cookie = switch,false,tag=　└ 取 Cookie,desc=要抓时才开；抓完关掉
 mishop_cron = input,"12 5 * * *",tag=　└ 签到时间,desc=默认 12 5 * * *，可改
-milottery = switch,false,tag=【小米抽奖】签到,desc=签到开关，默认 15 5 * * *
+milottery = switch,true,tag=【小米抽奖】签到,desc=签到开关，默认 15 5 * * *
 milottery_cookie = switch,false,tag=　└ 取 Cookie,desc=要抓时才开；抓完关掉
 milottery_cron = input,"15 5 * * *",tag=　└ 签到时间,desc=默认 15 5 * * *，可改
-youpin = switch,false,tag=【小米有品】签到,desc=签到开关，默认 18 5 * * *
+youpin = switch,true,tag=【小米有品】签到,desc=签到开关，默认 18 5 * * *
 youpin_cookie = switch,false,tag=　└ 取 Cookie,desc=要抓时才开；抓完关掉
 youpin_cron = input,"18 5 * * *",tag=　└ 签到时间,desc=默认 18 5 * * *，可改
-lhtj_app = switch,false,tag=【龙湖天街 App】签到,desc=签到开关，默认 21 5 * * *
+lhtj_app = switch,true,tag=【龙湖天街 App】签到,desc=签到开关，默认 21 5 * * *
 lhtj_app_cookie = switch,false,tag=　└ 取 Cookie,desc=要抓时才开；抓完关掉
 lhtj_app_cron = input,"21 5 * * *",tag=　└ 签到时间,desc=默认 21 5 * * *，可改
-qqmusic = switch,false,tag=【QQ音乐】签到与任务,desc=签到开关；三条任务各用下面三个时间
+qqmusic = switch,true,tag=【QQ音乐】签到与任务,desc=签到开关；三条任务各用下面三个时间
 qqmusic_cookie = switch,false,tag=　└ 取 Cookie,desc=要抓时才开；抓完关掉
 qqmusic_task_cron = input,"24 5 * * *",tag=　└ QQ音乐每日任务时间,desc=默认 24 5 * * *，可改
 qqmusic_coin_cron = input,"27 5 * * *",tag=　└ QQ音乐定时金币时间,desc=默认 27 5 * * *，可改
 qqmusic_rain_cron = input,"30 5 * * *",tag=　└ QQ音乐红包雨时间,desc=默认 30 5 * * *，可改
-wanda = switch,false,tag=【万达电影】签到,desc=签到开关，默认 33 5 * * *
+wanda = switch,true,tag=【万达电影】签到,desc=签到开关，默认 33 5 * * *
 wanda_cookie = switch,false,tag=　└ 取 Cookie,desc=要抓时才开；抓完关掉
 wanda_cron = input,"33 5 * * *",tag=　└ 签到时间,desc=默认 33 5 * * *，可改
-tingtingfm = switch,false,tag=【听听FM】签到,desc=签到开关，默认 36 5 * * *
+tingtingfm = switch,true,tag=【听听FM】签到,desc=签到开关，默认 36 5 * * *
 tingtingfm_cookie = switch,false,tag=　└ 取 Cookie,desc=要抓时才开；抓完关掉
 tingtingfm_cron = input,"36 5 * * *",tag=　└ 签到时间,desc=默认 36 5 * * *，可改
-wps = switch,false,tag=【WPS】签到与福利,desc=签到开关，默认 39 5 * * *
+wps = switch,true,tag=【WPS】签到与福利,desc=签到开关，默认 39 5 * * *
 wps_cookie = switch,false,tag=　└ 取 Cookie,desc=要抓时才开；抓完关掉
 wps_cron = input,"39 5 * * *",tag=　└ 签到时间,desc=默认 39 5 * * *，可改
-camscanner = switch,false,tag=【扫描全能王】抽奖,desc=签到开关，默认 42 5 * * *
+camscanner = switch,true,tag=【扫描全能王】抽奖,desc=签到开关，默认 42 5 * * *
 camscanner_cookie = switch,false,tag=　└ 取 Cookie,desc=要抓时才开；抓完关掉
 camscanner_cron = input,"42 5 * * *",tag=　└ 签到时间,desc=默认 42 5 * * *，可改
-dreame = switch,false,tag=【追觅】签到,desc=签到开关，默认 45 5 * * *
+dreame = switch,true,tag=【追觅】签到,desc=签到开关，默认 45 5 * * *
 dreame_cookie = switch,false,tag=　└ 取 Cookie,desc=要抓时才开；抓完关掉
 dreame_cron = input,"45 5 * * *",tag=　└ 签到时间,desc=默认 45 5 * * *，可改
-linghu = switch,false,tag=【灵狐灵购】签到,desc=签到开关，默认 48 5 * * *
+linghu = switch,true,tag=【灵狐灵购】签到,desc=签到开关，默认 48 5 * * *
 linghu_cookie = switch,false,tag=　└ 取 Cookie,desc=要抓时才开；抓完关掉
 linghu_cron = input,"48 5 * * *",tag=　└ 签到时间,desc=默认 48 5 * * *，可改
-nodeseek = switch,false,tag=【NodeSeek】签到,desc=签到开关，默认 51 5 * * *
+nodeseek = switch,true,tag=【NodeSeek】签到,desc=签到开关，默认 51 5 * * *
 nodeseek_cookie = switch,false,tag=　└ 取 Cookie,desc=要抓时才开；抓完关掉
 nodeseek_cron = input,"51 5 * * *",tag=　└ 签到时间,desc=默认 51 5 * * *，可改
-pan1 = switch,false,tag=【123社区】签到,desc=签到开关，默认 54 5 * * *
+pan1 = switch,true,tag=【123社区】签到,desc=签到开关，默认 54 5 * * *
 pan1_cookie = switch,false,tag=　└ 取 Cookie,desc=要抓时才开；抓完关掉
 pan1_cron = input,"54 5 * * *",tag=　└ 签到时间,desc=默认 54 5 * * *，可改
-agentrouter = switch,false,tag=【AgentRouter · onshine 本地版】签到,desc=用本仓库 agentrouter/agentrouter.js（非上游），默认 57 5 * * *；开关与下面四个参数都只对这个脚本生效
+agentrouter = switch,true,tag=【AgentRouter · onshine 本地版】签到,desc=用本仓库 agentrouter/agentrouter.js（非上游），默认 57 5 * * *；开关与下面四个参数都只对这个脚本生效
 username = input,"",tag=　└ 账号（onshine版）,desc=网站账号或邮箱；用多账号 JSON 时可留空
 password = input,"",tag=　└ 密码（onshine版）,desc=网站登录密码
 accounts = input,"",tag=　└ 多账号 JSON（onshine版）,desc=选填，填了优先用列表；格式见插件主页 README
 debug = switch,false,tag=　└ 调试日志（onshine版）
 agentrouter_cron = input,"57 5 * * *",tag=　└ 签到时间,desc=默认 57 5 * * *，可改
-sgcc = switch,false,tag=【网上国网 · onshine 本地版】签到,desc=用本仓库 sgcc/sgcc.js（手机号+密码自动登录，无需抓包），默认 00 6 * * *
+sgcc = switch,true,tag=【网上国网 · onshine 本地版】签到,desc=用本仓库 sgcc/sgcc.js（手机号+密码自动登录，无需抓包），默认 00 6 * * *
 sgcc_phone = input,"",tag=　└ 手机号,desc=网上国网登录手机号
 sgcc_password = input,"",tag=　└ 密码,desc=登录密码；⚠️ 连错 5 次锁 30 分钟，填错先改对再运行
 sgcc_sms = input,"",tag=　└ 短信验证码,desc=仅首次登录（新设备验证）填，填完手动运行一次
 sgcc_debug = switch,false,tag=　└ 调试日志
 sgcc_cron = input,"00 6 * * *",tag=　└ 签到时间,desc=默认 00 6 * * *，可改
-baidunetdisk = switch,false,tag=【百度网盘】成长值签到,desc=签到开关，默认 03 6 * * *
+baidunetdisk = switch,true,tag=【百度网盘】成长值签到,desc=签到开关，默认 03 6 * * *
 baidunetdisk_cookie = switch,false,tag=　└ 取 Cookie,desc=要抓时才开；抓完关掉
 baidunetdisk_cron = input,"03 6 * * *",tag=　└ 签到时间,desc=默认 03 6 * * *，可改
-laifen = switch,false,tag=【徕芬】签到,desc=签到开关，默认 06 6 * * *
+laifen = switch,true,tag=【徕芬】签到,desc=签到开关，默认 06 6 * * *
 laifen_cookie = switch,false,tag=　└ 取 Cookie,desc=要抓时才开；抓完关掉
 laifen_cron = input,"06 6 * * *",tag=　└ 签到时间,desc=默认 06 6 * * *，可改
-ppmt = switch,false,tag=【泡泡玛特】签到,desc=签到开关，默认 09 6 * * *
+ppmt = switch,true,tag=【泡泡玛特】签到,desc=签到开关，默认 09 6 * * *
 ppmt_cookie = switch,false,tag=　└ 取 Cookie,desc=要抓时才开；抓完关掉
 ppmt_cron = input,"09 6 * * *",tag=　└ 签到时间,desc=默认 09 6 * * *，可改
-tuhu = switch,false,tag=【途虎养车】签到,desc=签到开关，默认 12 6 * * *
+tuhu = switch,true,tag=【途虎养车】签到,desc=签到开关，默认 12 6 * * *
 tuhu_cookie = switch,false,tag=　└ 取 Cookie,desc=要抓时才开；抓完关掉
 tuhu_cron = input,"12 6 * * *",tag=　└ 签到时间,desc=默认 12 6 * * *，可改
-haidilao = switch,false,tag=【海底捞】签到,desc=签到开关，默认 15 6 * * *
+haidilao = switch,true,tag=【海底捞】签到,desc=签到开关，默认 15 6 * * *
 haidilao_cookie = switch,false,tag=　└ 取 Cookie,desc=要抓时才开；抓完关掉
 haidilao_cron = input,"15 6 * * *",tag=　└ 签到时间,desc=默认 15 6 * * *，可改
-huisheng = switch,false,tag=【惠省红包墙】领券,desc=签到开关，默认 18 6 * * *
+huisheng = switch,true,tag=【惠省红包墙】领券,desc=签到开关，默认 18 6 * * *
 huisheng_cookie = switch,false,tag=　└ 取 Cookie,desc=要抓时才开；抓完关掉
 huisheng_cron = input,"18 6 * * *",tag=　└ 签到时间,desc=默认 18 6 * * *，可改
-miniso = switch,false,tag=【名创优品】签到,desc=签到开关，默认 21 6 * * *
+miniso = switch,true,tag=【名创优品】签到,desc=签到开关，默认 21 6 * * *
 miniso_cookie = switch,false,tag=　└ 取 Cookie,desc=要抓时才开；抓完关掉
 miniso_cron = input,"21 6 * * *",tag=　└ 签到时间,desc=默认 21 6 * * *，可改
-longde = switch,false,tag=【龙德广场】签到,desc=签到开关，默认 24 6 * * *
+longde = switch,true,tag=【龙德广场】签到,desc=签到开关，默认 24 6 * * *
 longde_cookie = switch,false,tag=　└ 取 Cookie,desc=要抓时才开；抓完关掉
 longde_cron = input,"24 6 * * *",tag=　└ 签到时间,desc=默认 24 6 * * *，可改
-lhtj = switch,false,tag=【龙湖天街】签到,desc=签到开关，默认 27 6 * * *
+lhtj = switch,true,tag=【龙湖天街】签到,desc=签到开关，默认 27 6 * * *
 lhtj_cookie = switch,false,tag=　└ 取 Cookie,desc=要抓时才开；抓完关掉
 lhtj_cron = input,"27 6 * * *",tag=　└ 签到时间,desc=默认 27 6 * * *，可改
-wedome = switch,false,tag=【味多美】签到,desc=签到开关，默认 30 6 * * *
+wedome = switch,true,tag=【味多美】签到,desc=签到开关，默认 30 6 * * *
 wedome_cookie = switch,false,tag=　└ 取 Cookie,desc=要抓时才开；抓完关掉
 wedome_cron = input,"30 6 * * *",tag=　└ 签到时间,desc=默认 30 6 * * *，可改
-bhg = switch,false,tag=【北京华联】签到,desc=签到开关，默认 33 6 * * *
+bhg = switch,true,tag=【北京华联】签到,desc=签到开关，默认 33 6 * * *
 bhg_cookie = switch,false,tag=　└ 取 Cookie,desc=要抓时才开；抓完关掉
 bhg_cron = input,"33 6 * * *",tag=　└ 签到时间,desc=默认 33 6 * * *，可改
-linli = switch,false,tag=【林里】签到,desc=签到开关，默认 36 6 * * *
+linli = switch,true,tag=【林里】签到,desc=签到开关，默认 36 6 * * *
 linli_cookie = switch,false,tag=　└ 取 Cookie,desc=要抓时才开；抓完关掉
 linli_cron = input,"36 6 * * *",tag=　└ 签到时间,desc=默认 36 6 * * *，可改
-teld = switch,false,tag=【特来电】签到,desc=签到开关，默认 39 6 * * *
+teld = switch,true,tag=【特来电】签到,desc=签到开关，默认 39 6 * * *
 teld_cookie = switch,false,tag=　└ 取 Cookie,desc=要抓时才开；抓完关掉
 teld_cron = input,"39 6 * * *",tag=　└ 签到时间,desc=默认 39 6 * * *，可改
-songshan = switch,false,tag=【松山棉店】签到,desc=签到开关，默认 42 6 * * *
+songshan = switch,true,tag=【松山棉店】签到,desc=签到开关，默认 42 6 * * *
 songshan_cookie = switch,false,tag=　└ 取 Cookie,desc=要抓时才开；抓完关掉
 songshan_cron = input,"42 6 * * *",tag=　└ 签到时间,desc=默认 42 6 * * *，可改
-bibisheng = switch,false,tag=【笔笔省】领券,desc=签到开关，默认 45 6 * * *
+bibisheng = switch,true,tag=【笔笔省】领券,desc=签到开关，默认 45 6 * * *
 bibisheng_cookie = switch,false,tag=　└ 取 Cookie,desc=要抓时才开；抓完关掉
 bibisheng_cron = input,"45 6 * * *",tag=　└ 签到时间,desc=默认 45 6 * * *，可改
-casetify = switch,false,tag=【CASETiFY】签到,desc=签到开关，默认 48 6 * * *
+casetify = switch,true,tag=【CASETiFY】签到,desc=签到开关，默认 48 6 * * *
 casetify_cookie = switch,false,tag=　└ 取 Cookie,desc=要抓时才开；抓完关掉
 casetify_cron = input,"48 6 * * *",tag=　└ 签到时间,desc=默认 48 6 * * *，可改
 
