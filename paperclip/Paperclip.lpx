@@ -1,5 +1,5 @@
 #!name=Paperclip · 签到 + Cookie 合体（onshine 外壳）
-#!desc=Paperclip 全套签到脚本与 Cookie 抓取，<b>一个插件搞定</b>。脚本本体一并<a href="https://github.com/MaYIHEI/paperclip">引用上游 MaYIHEI/paperclip</a>（不内置），作者更新这里自动跟上。<b>规则成对排布</b>：每个脚本「签到」一条，紧跟其下就是它自己的「Cookie 抓取」一条；开关也成对——上面是<b>签到开关</b>（默认开），下面是<b>抓取开关</b>（默认关，要抓才开）。没抓过 Cookie 的脚本自动跳过签到。「统一通知」打开后每天一条汇总，关闭则各自推送。相比作者原插件：①每个脚本签到时间可改（留空＝上游默认）；②汇总时间可改；③修掉上游「小米抽奖」<code>0 30 7 * * *</code> 六段 cron 永不触发；④补特来电、松山棉店、笔笔省、CASETiFY 4 个脚本（<b>特来电引用你的 gist 原文，一个字没改</b>）；⑤MITM 用 %APPEND% 追加，不覆盖其它插件。⚠️ 与原插件<b>二选一</b>：先删掉作者的「签到合集」和「Cookie 抓取合集」再装这个。需 Loon 3.5.1(983)+。<b>更新后请删除旧插件重新添加</b>。
+#!desc=Paperclip 全套签到脚本与 Cookie 抓取，<b>一个插件搞定</b>。脚本本体一并<a href="https://github.com/MaYIHEI/paperclip">引用上游 MaYIHEI/paperclip</a>（不内置），作者更新这里自动跟上。<b>规则成对排布</b>：每个脚本「签到」一条，紧跟其下就是它自己的「Cookie 抓取」一条；开关也成对——上面是<b>签到开关</b>（默认开），下面是<b>抓取开关</b>（默认关，要抓才开）。没抓过 Cookie 的脚本自动跳过签到。「统一通知」打开后每天一条汇总，关闭则各自推送。相比作者原插件：⓪<b>最上面新增「摸鱼〔日历〕」</b>：每日摸鱼 + 节日/生日倒计时，时间可改，不参与签到/汇总/取 Cookie；①每个脚本签到时间可改（留空＝上游默认）；②汇总时间可改；③修掉上游「小米抽奖」<code>0 30 7 * * *</code> 六段 cron 永不触发；④补特来电、松山棉店、笔笔省、CASETiFY 4 个脚本（<b>特来电引用你的 gist 原文，一个字没改</b>）；⑤MITM 用 %APPEND% 追加，不覆盖其它插件。⚠️ 与原插件<b>二选一</b>：先删掉作者的「签到合集」和「Cookie 抓取合集」再装这个。需 Loon 3.5.1(983)+。<b>更新后请删除旧插件重新添加</b>。
 #!author=MaYIHEI（脚本）· Minis（Loon 外壳）
 #!homepage=https://github.com/onshine/ScriptHubs/tree/main/paperclip
 #!icon=https://raw.githubusercontent.com/MaYIHEI/pin/refs/heads/main/app/paperclip-checkin.png
@@ -7,6 +7,7 @@
 #!loon_version=3.5.1(983)
 
 [Argument]
+moyu_cron = input,"09 5 * * *",tag=【摸鱼来啦】〔日历〕节日与生日倒计时,desc=每天推送摸鱼信息、农历日期与节日/生日倒计时；Cron 默认 09 5 * * *，可改（分 时 日 月 周）
 merge = switch,false,tag=【统一通知】每天一条汇总,desc=打开后各脚本不再单独弹通知，按「汇总时间」统一发一条；关闭则各自推送
 summary_cron = input,"0 7 * * *",tag=　└ 汇总时间,desc=默认 0 7 * * *（最后一个签到 6:48 之后）
 weibotalk = switch,false,tag=【微博超话】签到,desc=签到开关，默认 00 5 * * *
@@ -124,6 +125,9 @@ casetify_cookie = switch,false,tag=　└ 取 Cookie,desc=要抓时才开；抓�
 casetify_cron = input,"48 6 * * *",tag=　└ 签到时间,desc=默认 48 6 * * *，可改
 
 [Script]
+
+# ==== 【摸鱼来啦】〔日历〕—— 不是签到，不参与 Cookie 抓取与统一汇总 ====
+cron ${moyu_cron} then script("https://raw.githubusercontent.com/onshine/ScriptHubs/main/moyu/moyu.js") with tag="摸鱼〔日历〕", img_url="https://is1-ssl.mzstatic.com/image/thumb/Purple126/v4/67/04/ff/6704ff4c-b49b-de91-70ac-201c62d5296f/AppIcon-0-0-1x_U007emarketing-0-0-0-5-0-0-sRGB-60x60@2x.png/60x60bb.png", timeout=60
 
 # ==== 签到汇总 ====
 cron ${summary_cron} then script("https://raw.githubusercontent.com/MaYIHEI/paperclip/refs/heads/main/app/summary/summary.js", {${weibotalk}, ${tenvideo}, ${mihoyo}, ${newmixc}, ${mishop}, ${milottery}, ${youpin}, ${lhtj_app}, ${qqmusic}, ${wanda}, ${tingtingfm}, ${wps}, ${camscanner}, ${dreame}, ${linghu}, ${nodeseek}, ${pan1}, ${agentrouter}, ${sgcc}, ${baidunetdisk}, ${laifen}, ${ppmt}, ${tuhu}, ${haidilao}, ${huisheng}, ${miniso}, ${longde}, ${lhtj}, ${wedome}, ${bhg}, ${linli}) with tag="签到汇总", img_url="https://raw.githubusercontent.com/MaYIHEI/pin/refs/heads/main/app/paperclip-checkin.png", enable=${merge}
