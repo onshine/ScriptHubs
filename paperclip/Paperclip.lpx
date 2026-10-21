@@ -68,7 +68,7 @@ password = input,"",tag=　└ 密码（onshine版）,desc=网站登录密码
 accounts = input,"",tag=　└ 多账号 JSON（onshine版）,desc=选填，填了优先用列表；格式见插件主页 README
 debug = switch,false,tag=　└ 调试日志（onshine版）
 agentrouter_cron = input,"57 5 * * *",tag=　└ 签到时间,desc=默认 57 5 * * *，可改
-sgcc = switch,false,tag=【网上国网】签到,desc=签到开关，默认 00 6 * * *
+sgcc = switch,false,tag=【网上国网 · onshine 本地版】签到,desc=用本仓库 sgcc/sgcc.js（手机号+密码自动登录，无需抓包），默认 00 6 * * *
 sgcc_phone = input,"",tag=　└ 手机号,desc=网上国网登录手机号
 sgcc_password = input,"",tag=　└ 密码,desc=登录密码；⚠️ 连错 5 次锁 30 分钟，填错先改对再运行
 sgcc_sms = input,"",tag=　└ 短信验证码,desc=仅首次登录（新设备验证）填，填完手动运行一次
@@ -211,7 +211,7 @@ request if ${url} ~= /^https:\/\/pan1\.me\/(?:\?|$)/i then script("https://raw.g
 cron ${agentrouter_cron} then script("https://raw.githubusercontent.com/onshine/ScriptHubs/main/agentrouter/agentrouter.js", {${username}, ${password}, ${accounts}, ${debug}, ${merge}}) with tag="AgentRouter签到·onshine版", img_url="https://raw.githubusercontent.com/MaYIHEI/paperclip/refs/heads/main/app/agentrouter/icon.png", timeout=300, enable=${agentrouter}
 
 # ---- 【网上国网】签到 ----
-cron ${sgcc_cron} then script("https://raw.githubusercontent.com/MaYIHEI/paperclip/refs/heads/main/app/sgcc/sgcc.js", {${sgcc_phone}, ${sgcc_password}, ${sgcc_sms}, ${sgcc_debug}}) with tag="网上国网签到", img_url="https://raw.githubusercontent.com/MaYIHEI/pin/refs/heads/main/app/sgcc.png", timeout=60, enable=${sgcc}
+cron ${sgcc_cron} then script("https://raw.githubusercontent.com/onshine/ScriptHubs/main/sgcc/sgcc.js", {${sgcc_phone}, ${sgcc_password}, ${sgcc_sms}, ${sgcc_debug}}) with tag="网上国网签到·onshine版", img_url="https://raw.githubusercontent.com/MaYIHEI/pin/refs/heads/main/app/sgcc.png", timeout=60, enable=${sgcc}
 
 # ---- 【百度网盘】成长值签到 ----
 cron ${baidunetdisk_cron} then script("https://raw.githubusercontent.com/MaYIHEI/paperclip/refs/heads/main/app/baidunetdisk/baidunetdisk.js", {${merge}}) with tag="百度网盘签到", img_url="https://raw.githubusercontent.com/MaYIHEI/pin/refs/heads/main/app/baidunetdisk.png", enable=${baidunetdisk}
