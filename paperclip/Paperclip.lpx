@@ -1,5 +1,5 @@
 #!name=Paperclip · 签到 + Cookie 合体（onshine 外壳）
-#!desc=Paperclip 全套签到脚本与 Cookie 抓取，<b>一个插件搞定</b>。脚本本体一并<a href="https://github.com/MaYIHEI/paperclip">引用上游 MaYIHEI/paperclip</a>（不内置），作者更新这里自动跟上。<b>规则成对排布</b>：每个脚本「签到」一条，紧跟其下就是它自己的「Cookie 抓取」一条；开关也成对——上面是<b>签到开关</b>（默认开），下面是<b>抓取开关</b>（默认关，要抓才开）。没抓过 Cookie 的脚本自动跳过签到。「统一通知」打开后每天一条汇总，关闭则各自推送。相比作者原插件：⓪<b>第二位新增「摸鱼〔日历〕」</b>：摸鱼信息 + 节日/生日倒计时，时间和节日生日配置都在插件里改，不参与签到/汇总/取 Cookie；①每个脚本签到时间可改（留空＝上游默认）；②汇总时间可改；③修掉上游「小米抽奖」<code>0 30 7 * * *</code> 六段 cron 永不触发；④补特来电、松山棉店、笔笔省、CASETiFY 4 个脚本（<b>特来电引用你的 gist 原文，一个字没改</b>）；⑤MITM 用 %APPEND% 追加，不覆盖其它插件。⚠️ 与原插件<b>二选一</b>：先删掉作者的「签到合集」和「Cookie 抓取合集」再装这个。需 Loon 3.5.1(983)+。<b>更新后请删除旧插件重新添加</b>。
+#!desc=Paperclip 全套签到脚本与 Cookie 抓取，<b>一个插件搞定</b>。脚本本体一并<a href="https://github.com/MaYIHEI/paperclip">引用上游 MaYIHEI/paperclip</a>（不内置），作者更新这里自动跟上。<b>规则成对排布</b>：每个脚本「签到」一条，紧跟其下就是它自己的「Cookie 抓取」一条；开关也成对——上面是<b>签到开关</b>（默认开），下面是<b>抓取开关</b>（默认关，要抓才开）。没抓过 Cookie 的脚本自动跳过签到。「统一通知」打开后每天一条汇总，关闭则各自推送。相比作者原插件：⓪<b>第二位新增「摸鱼〔日历〕」</b>：摸鱼信息 + 节日/生日倒计时，时间和节日生日配置都在插件里改，不参与签到/汇总/取 Cookie；①每个脚本签到时间可改（留空＝上游默认）；②汇总时间可改；③修掉上游「小米抽奖」<code>0 30 7 * * *</code> 六段 cron 永不触发；④补特来电、松山棉店、笔笔省、CASETiFY 4 个脚本（<b>特来电引用你的 gist 原文，一个字没改</b>）；⑤MITM 用 %APPEND% 追加，不覆盖其它插件；⑥<b>末尾新增车来了签到、车来了去广告、Bing CN 搜索</b>三项，参数与时间都在插件里改。⚠️ 与原插件<b>二选一</b>：先删掉作者的「签到合集」和「Cookie 抓取合集」再装这个。需 Loon 3.5.1(983)+。<b>更新后请删除旧插件重新添加</b>。
 #!author=MaYIHEI（脚本）· Minis（Loon 外壳）
 #!homepage=https://github.com/onshine/ScriptHubs/tree/main/paperclip
 #!icon=https://raw.githubusercontent.com/MaYIHEI/pin/refs/heads/main/app/paperclip-checkin.png
@@ -127,6 +127,29 @@ bibisheng_cron = input,"45 6 * * *",tag=　└ 签到时间,desc=默认 45 6 * *
 casetify = switch,false,tag=【CASETiFY】签到,desc=签到开关，默认 48 6 * * *
 casetify_cookie = switch,false,tag=　└ 取 Cookie,desc=要抓时才开；抓完关掉
 casetify_cron = input,"48 6 * * *",tag=　└ 签到时间,desc=默认 48 6 * * *，可改
+
+
+cl_cron = input,"1 0 * * *",tag=【车来了签到】主任务时间,desc=顺序是「分 时 日 月 周」。例：1 0 * * * 每天 00:01；30 8 * * * 每天 08:30
+cl_cron_backup = input,"5 8 * * *",tag=　└ 补签兜底时间,desc=当天已签则静默跳过，默认每天 08:05
+cl_udid = input,"",tag=　└ udid,desc=一般留空，由抓包自动获取
+cl_accountId = input,"",tag=　└ accountId,desc=一般留空，由抓包自动获取
+cl_secret = input,"",tag=　└ secret,desc=一般留空，由抓包自动获取。签到接口必需，少了会报 0002
+cl_s = input,"1",tag=　└ s,desc=签到接口要求非空即可，默认 1
+cl_notify_on_capture = switch,true,tag=　└ 抓到凭证时通知,desc=同一个凭证只提示一次
+cl_notify_when_signed = switch,true,tag=　└ 已签到也通知,desc=当天已签到时也推送通知
+cl_backup_silent = switch,true,tag=　└ 兜底静默,desc=兜底那趟当天已签时不通知
+cl_debug = switch,false,tag=　└ 调试日志,desc=输出接口原始响应（已自动脱敏）
+
+ads_remove_splash = switch,true,tag=【车来了去广告】去开屏/插屏,desc=清洗启动配置里的开屏、插屏、预加载开关，建议保持开启
+ads_remove_ad_sdk = switch,true,tag=　└ 掐断广告SDK(yg84),desc=清空 adx 调度与 ssp 素材，去开屏的关键项
+ads_remove_home_grid = switch,true,tag=　└ 去首页金刚位推广,desc=保留地铁、站点地图等功能入口
+ads_remove_feed = switch,true,tag=　└ 去信息流/文章推荐,desc=移除详情页推荐与城市列表推广图
+ads_remove_notice = switch,true,tag=　└ 去公告/活动弹窗,desc=移除公告、活动控制、LED 天气条
+ads_block_httpdns = switch,true,tag=　└ 防 DNS 绕过,desc=移除配置里的 useHttpDns / 备用域名，防止绕过 Loon
+ads_debug = switch,false,tag=　└ 调试日志,desc=输出每个接口的处理结果，排查时打开
+
+bing_appkey = input,"",tag=【Bing CN 搜索】AppKey,desc=api.gmya.net 的 AppKey；留空也会尝试公共接口
+bing_cron = input,"10 5 * * *",tag=　└ 每日执行时间,desc=默认每天 05:10（原插件是六段写法，Loon 用五段）
 
 [Script]
 
@@ -291,5 +314,46 @@ request if ${url} ~= /^https:\/\/discount\.wxpapp\.wechatpay\.cn\/txbbs-mall\/co
 cron ${casetify_cron} then script("https://raw.githubusercontent.com/MaYIHEI/paperclip/refs/heads/main/miniprogram/casetify/casetify.js") with tag="CASETiFY签到", img_url="https://raw.githubusercontent.com/MaYIHEI/pin/refs/heads/main/app/casetify.png", timeout=60, enable=${casetify}
 response if ${url} ~= /^https:\/\/mini-app-api\.casetify\.cn\/api\/v4\/estore\/member\/checkWebToken/i then script("https://raw.githubusercontent.com/MaYIHEI/paperclip/refs/heads/main/miniprogram/casetify/casetify.js") with enable=${casetify_cookie}, tag="CASETiFY Cookie", img_url="https://raw.githubusercontent.com/MaYIHEI/pin/refs/heads/main/app/casetify.png", requires_body=true
 
+
+# ==== 车来了签到：先抓凭证，再定时签到 + 兜底补签 ====
+request if ${url} ~= /^https?:\/\/(?:[a-z0-9-]+\.)*(?:chelaile\.net\.cn|chelaileapp\.cn)\/|^https?:\/\/124\.(?:70\.194\.16|71\.153\.172)\//i then script("https://raw.githubusercontent.com/onshine/ScriptHubs/main/chelaile-checkin/chelaile-checkin.js", {udid: ${cl_udid}, accountId: ${cl_accountId}, notify_on_capture: ${cl_notify_on_capture}, debug: ${cl_debug}}) with tag="车来了抓凭证", img_url="https://raw.githubusercontent.com/luestr/IconResource/main/App_icon/120px/Chelaile.png", timeout=30
+cron ${cl_cron} then script("https://raw.githubusercontent.com/onshine/ScriptHubs/main/chelaile-checkin/chelaile-checkin.js", {udid: ${cl_udid}, accountId: ${cl_accountId}, secret: ${cl_secret}, s: ${cl_s}, notify_when_signed: ${cl_notify_when_signed}, debug: ${cl_debug}}) with tag="车来了签到", img_url="https://raw.githubusercontent.com/luestr/IconResource/main/App_icon/120px/Chelaile.png", timeout=300
+cron ${cl_cron_backup} then script("https://raw.githubusercontent.com/onshine/ScriptHubs/main/chelaile-checkin/chelaile-checkin.js", {udid: ${cl_udid}, accountId: ${cl_accountId}, secret: ${cl_secret}, s: ${cl_s}, silent_when_signed: ${cl_backup_silent}, debug: ${cl_debug}}) with tag="车来了补签兜底", img_url="https://raw.githubusercontent.com/luestr/IconResource/main/App_icon/120px/Chelaile.png", timeout=300
+
+# ==== 车来了去广告（响应清洗） ====
+response if ${url} ~= /^https?:\/\/[^\/]+\/(?:api\/)?(?:bus-side\/appToggle\/getStatus|goocity\/flowPos\/home|goocity\/flowPos\/listByPos|goocity\/city!|goocity\/config\/notices|encourage\/activity\/control|operative_position\/infoflow|led-weather\/[^\/]*\/condition_brief)|^https?:\/\/adx\.yg84\.com\/sdk\/ad\/|^https?:\/\/ssp\.yg84\.com\/ssp\/(?:ad\/list|tracking\/)/i then script("https://raw.githubusercontent.com/onshine/ScriptHubs/main/chelaile/chelaile-ads.js", {remove_splash: ${ads_remove_splash}, remove_ad_sdk: ${ads_remove_ad_sdk}, remove_home_grid: ${ads_remove_home_grid}, remove_feed: ${ads_remove_feed}, remove_notice: ${ads_remove_notice}, block_httpdns: ${ads_block_httpdns}, debug: ${ads_debug}}) with tag="车来了去广告", img_url="https://raw.githubusercontent.com/luestr/IconResource/main/App_icon/120px/Chelaile.png", requires_body=true, timeout=30
+
+# ==== Bing CN 自动搜索 + 抓 Cookie ====
+cron ${bing_cron} then script("https://gist.githubusercontent.com/onshine/02e4a4b20253e434e426a0a7e40aa3ea/raw/bingcn-v6.js", {appkey: ${bing_appkey}}) with tag="BingCN 多榜单搜索", img_url="https://www.bing.com/favicon.ico", timeout=1200
+request if ${url} ~= /^https:\/\/cn\.bing\.com\/(?:$|search(?:\?|$))/i then script("https://gist.githubusercontent.com/onshine/3c11e14ea4b62dad79423c47cb037254/raw/bingcn-cookie-v4.js") with tag="BingCN 抓Cookie", img_url="https://www.bing.com/favicon.ico", timeout=30
+
+[Rule]
+# 车来了自己的广告与埋点（不需要 MITM）
+DOMAIN, ad.chelaile.net.cn, REJECT
+DOMAIN, atrace.chelaile.net.cn, REJECT
+DOMAIN, logs.chelaile.net.cn, REJECT
+# 开屏广告来源：yg84 广告 SDK（adx 调度 / ssp 素材 / ctrace 埋点同根域）
+DOMAIN-SUFFIX, yg84.com, REJECT
+# 第三方广告 SDK：穿山甲、百度
+DOMAIN-SUFFIX, pangolin-sdk-toutiao.com, REJECT
+DOMAIN-SUFFIX, pangolin-sdk-toutiao1.com, REJECT
+DOMAIN-SUFFIX, pangolin-sdk-toutiao-b.com, REJECT
+DOMAIN-SUFFIX, mobads.baidu.com, REJECT
+DOMAIN-SUFFIX, pos.baidu.com, REJECT
+DOMAIN-SUFFIX, sofire.baidu.com, REJECT
+# 开屏广告曝光确认像素
+DOMAIN, m.magicacid.cn, REJECT
+
+[Rewrite]
+^https?:\/\/pic1\.chelaile\.net\.cn\/adv\/ reject
+^https?:\/\/[^\/]+\/(?:api\/)?adpub reject
+^https?:\/\/[^\/]+\/goocity\/advert reject
+^https?:\/\/124\.70\.194\.16\/(?:ip|adpub) reject
+^https?:\/\/124\.71\.153\.172\/(?:ip|adpub) reject
+^https?:\/\/cdn\.[a-z0-9]+\.chelaileapp\.cn\/(?:api\/)?adpub reject
+^https?:\/\/cdn\.web\.chelaile\.net\.cn\/info-flow\/index\.html reject
+^https?:\/\/[^\/]+\/feserver\/vip-page\/images\/ reject
+^https?:\/\/image3\.chelaile\.net\.cn\/hw6u6LYY\.png reject-img
+
 [MITM]
-hostname = %APPEND% api.weibo.cn, pbaccess.video.qq.com, vip.video.qq.com, api-takumi.miyoushe.com, api-takumi.mihoyo.com, app.mixcapp.com, shop-api.retail.mi.com, m.xiaomiyoupin.com, gw2c-hw-open.longfor.com, u6.y.qq.com, user-api-prd-mx.wandafilm.com, xunting.vbegin.com.cn, personal-act.wps.cn, api-cs.intsig.net, cn-wxmall.dreame.tech, cn-yx-wxmall.dreame.tech, www.nodeseek.com, pan1.me, pan.baidu.com, app-gw.shuye.com, popvip.paquapp.com, api.tuhu.cn, superapp-public.kiwa-tech.com, media.meituan.com, member-center.miniso.com, a.china-smartech.com, scrm-b.zjian.net, webapi.qmai.cn, sgi.teld.cc, c2.teld.cc
+hostname = %APPEND% api.weibo.cn, pbaccess.video.qq.com, vip.video.qq.com, api-takumi.miyoushe.com, api-takumi.mihoyo.com, app.mixcapp.com, shop-api.retail.mi.com, m.xiaomiyoupin.com, gw2c-hw-open.longfor.com, u6.y.qq.com, user-api-prd-mx.wandafilm.com, xunting.vbegin.com.cn, personal-act.wps.cn, api-cs.intsig.net, cn-wxmall.dreame.tech, cn-yx-wxmall.dreame.tech, www.nodeseek.com, pan1.me, pan.baidu.com, app-gw.shuye.com, popvip.paquapp.com, api.tuhu.cn, superapp-public.kiwa-tech.com, media.meituan.com, member-center.miniso.com, a.china-smartech.com, scrm-b.zjian.net, webapi.qmai.cn, sgi.teld.cc, c2.teld.cc, api.chelaile.net.cn, web.chelaile.net.cn, cdn.web.chelaile.net.cn, cdn.api.chelaile.net.cn, image3.chelaile.net.cn, pic1.chelaile.net.cn, adx.yg84.com, ssp.yg84.com, 124.70.194.16, 124.71.153.172, cn.bing.com
