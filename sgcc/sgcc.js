@@ -41,7 +41,7 @@
  */
 
 const $ = new Env("网上国网");
-const SCRIPT_VERSION = "2026-10-16.r6"; // 改一次 +1,确认拉到最新版
+const SCRIPT_VERSION = "2026-10-21.r7"; // 改一次 +1,确认拉到最新版
 $.log(`[INFO] 脚本版本 ${SCRIPT_VERSION}`);
 
 const KEY_PHONE = "sgcc_phone";       // 账号(手机号)
@@ -53,7 +53,16 @@ const KEY_PEND = "sgcc_sms_pending";  // 已发验证码 {user,codeKey,ts,used}
 const P_SIGN = "osg-omgmt1042/member/m1/0103514";
 const P_GOLD = "osg-omgmt1042/member/c1/q104051";
 // Loon 插件设置优先,没填则读 BoxJS
-const ARG = typeof $argument === "object" && $argument ? $argument : {};
+// Loon 按「参数名」解析 $argument：插件里若把项命名为 sgcc_phone，键名就是 sgcc_phone。
+// 这里同时认 phone 与 sgcc_phone 两种写法，避免改插件名后脚本读不到。
+const RAW_ARG = typeof $argument === "object" && $argument ? $argument : {};
+const ARG = Object.assign({}, RAW_ARG);
+["phone", "password", "sms", "debug"].forEach((k) => {
+  if (ARG[k] === undefined || ARG[k] === "") {
+    const alt = RAW_ARG["sgcc_" + k];
+    if (alt !== undefined && alt !== "") ARG[k] = alt;
+  }
+});
 const DEBUG = ARG.debug === true || ARG.debug === "true" || $.getdata("sgcc_debug") === "true";
 
 const getJ = (k) => { try { return JSON.parse($.getdata(k) || "null"); } catch (e) { return null; } };
