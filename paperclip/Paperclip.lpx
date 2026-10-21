@@ -259,8 +259,8 @@ cron ${bhg_cron} then script("https://raw.githubusercontent.com/MaYIHEI/papercli
 request if ${url} ~= /https:\/\/a\.china-smartech\.com\/restful\/mall\/\d+\/checkInForm/i && ${request.header['referer']} ~= /wx1b1dda695dff82c8/ then script("https://raw.githubusercontent.com/MaYIHEI/paperclip/refs/heads/main/miniprogram/bhg/bhg.js") with enable=${bhg_cookie}, tag="北京华联 Cookie", img_url="https://raw.githubusercontent.com/MaYIHEI/pin/refs/heads/main/app/bhg.png"
 
 # ---- 【林里】签到 ----
-cron ${linli_cron} then script("https://raw.githubusercontent.com/MaYIHEI/paperclip/refs/heads/main/miniprogram/linli/linli.js", {${merge}}) with tag="林里签到", img_url="https://raw.githubusercontent.com/MaYIHEI/pin/refs/heads/main/app/linli.png", enable=${linli}
-request if ${url} ~= /^https:\/\/webapi\.qmai\.cn\/web\/(cmk-center\/sign\/(activityInfo|userSignStatistics|userSignRecordCalendar)|catering\/common\/common-info|mall-apiserver\/integral\/(home\/index|item\/goods(\/detail)?))/i then script("https://raw.githubusercontent.com/MaYIHEI/paperclip/refs/heads/main/miniprogram/linli/linli.js") with enable=${linli_cookie}, tag="林里 Cookie", img_url="https://raw.githubusercontent.com/MaYIHEI/pin/refs/heads/main/app/linli.png", requires_body=true
+cron ${linli_cron} then script("https://raw.githubusercontent.com/onshine/ScriptHubs/main/linli/linli.js", {${merge}}) with tag="林里签到", img_url="https://raw.githubusercontent.com/MaYIHEI/pin/refs/heads/main/app/linli.png", enable=${linli}
+request if ${url} ~= /^https:\/\/webapi\.qmai\.cn\/web\/(cmk-center\/sign\/(activityInfo|userSignStatistics|userSignRecordCalendar)|catering\/common\/common-info|mall-apiserver\/integral\/(home\/index|item\/goods(\/detail)?))/i then script("https://raw.githubusercontent.com/onshine/ScriptHubs/main/linli/linli.js") with enable=${linli_cookie}, tag="林里 Cookie", img_url="https://raw.githubusercontent.com/MaYIHEI/pin/refs/heads/main/app/linli.png", requires_body=true
 
 # ==== 上游插件未收录、本外壳补充的 4 个 ====
 
@@ -269,8 +269,8 @@ cron ${teld_cron} then script("https://gist.githubusercontent.com/onshine/9cb869
 request if ${url} ~= /^https:\/\/sgi\.teld\.cc\/api\/invoke/i then script("https://gist.githubusercontent.com/onshine/9cb869dc3ca5f1ada8353043053b31cc/raw/teld.js") with enable=${teld_cookie}, tag="特来电 Cookie", img_url="https://raw.githubusercontent.com/MaYIHEI/pin/refs/heads/main/app/teld.png"
 
 # ---- 【松山棉店】签到 ----
-cron ${songshan_cron} then script("https://raw.githubusercontent.com/MaYIHEI/paperclip/refs/heads/main/miniprogram/songshan/songshan.js") with tag="松山棉店签到", img_url="https://raw.githubusercontent.com/MaYIHEI/pin/refs/heads/main/app/songshan.png", enable=${songshan}
-request if ${url} ~= /^https:\/\/xapi\.weimob\.com\/api3\/onecrm\/mactivity\/sign\/misc\/sign\/activity\/(c\/signMainInfo|core\/c\/(getActivityInfo|sign))/i then script("https://raw.githubusercontent.com/MaYIHEI/paperclip/refs/heads/main/miniprogram/songshan/songshan.js") with enable=${songshan_cookie}, tag="松山棉店 Cookie", img_url="https://raw.githubusercontent.com/MaYIHEI/pin/refs/heads/main/app/songshan.png", requires_body=true
+cron ${songshan_cron} then script("https://raw.githubusercontent.com/onshine/ScriptHubs/main/songshan/songshan.js") with tag="松山棉店签到", img_url="https://raw.githubusercontent.com/MaYIHEI/pin/refs/heads/main/app/songshan.png", enable=${songshan}
+request if ${url} ~= /^https:\/\/xapi\.weimob\.com\/api3\/onecrm\/mactivity\/sign\/misc\/sign\/activity\/(c\/signMainInfo|core\/c\/(getActivityInfo|sign))/i then script("https://raw.githubusercontent.com/onshine/ScriptHubs/main/songshan/songshan.js") with enable=${songshan_cookie}, tag="松山棉店 Cookie", img_url="https://raw.githubusercontent.com/MaYIHEI/pin/refs/heads/main/app/songshan.png", requires_body=true
 
 # ---- 【笔笔省】领券 ----
 cron ${bibisheng_cron} then script("https://raw.githubusercontent.com/MaYIHEI/paperclip/refs/heads/main/miniprogram/bibisheng/bibisheng.js") with tag="笔笔省领券", img_url="https://raw.githubusercontent.com/MaYIHEI/pin/refs/heads/main/app/bibisheng.png", enable=${bibisheng}
