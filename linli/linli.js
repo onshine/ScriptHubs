@@ -57,7 +57,7 @@ const $ = new Env("林里");
 $.merge = typeof $argument === "object" && !!$argument && $argument.merge === true;
 if ($.merge) $.msg = (...a) => console.log(a.filter((x) => typeof x === "string" && x).join("\n"));
 
-const SCRIPT_VERSION = "2026-10-21.r3"; // 改一次 +1,确认拉到最新版
+const SCRIPT_VERSION = "2026-10-21.r4"; // 改一次 +1,确认拉到最新版
 $.log(`[INFO] 脚本版本 ${SCRIPT_VERSION}`);
 
 const CK_KEY = "linli_data";
@@ -274,7 +274,8 @@ function debug(content, title) {
 
 if (typeof $request !== "undefined") {
     captureCookie();
-    $.done();
+    // Loon 3.5.2：无参 $done() 会报「执行JavaScript返回结果的类型不受支持」，显式传空对象
+    $.done({});
 } else {
     (async () => {
         if (maybeClear()) return;
