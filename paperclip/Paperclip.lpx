@@ -149,6 +149,7 @@ ads_debug = switch,false,tag=　└ 调试日志,desc=输出每个接口的处�
 
 bing_appkey = input,"",tag=【Bing CN 搜索】AppKey,desc=api.gmya.net 的 AppKey；留空也会尝试公共接口
 bing_cron = input,"10 5 * * *",tag=　└ 每日执行时间,desc=默认每天 05:10（原插件是六段写法，Loon 用五段）
+bing_cookie = switch,true,tag=　└ 抓取 Cookie,desc=登录 cn.bing.com 并搜索一次时自动保存 Cookie；默认开
 
 PingMe = switch,true,tag=【PingMe】签到 + 视频奖励,desc=关掉后抓包与定时签到都不执行；首次打开 PingMe 登录后自动抓凭证
 PingMe_cron = input,"30 8,20 * * *",tag=　└ 签到时间,desc=默认每天 8:30 与 20:30 各一次，格式：分 时 日 月 周
@@ -329,7 +330,7 @@ response if ${url} ~= /^https?:\/\/[^\/]+\/(?:api\/)?(?:bus-side\/appToggle\/get
 
 # ==== Bing CN 自动搜索 + 抓 Cookie ====
 cron ${bing_cron} then script("https://gist.githubusercontent.com/onshine/02e4a4b20253e434e426a0a7e40aa3ea/raw/bingcn-v6.js", {appkey: ${bing_appkey}}) with tag="44 BingCN 多榜单搜索", img_url="https://www.bing.com/favicon.ico", timeout=1200
-request if ${url} ~= /^https:\/\/cn\.bing\.com\/(?:$|search(?:\?|$))/i then script("https://gist.githubusercontent.com/onshine/3c11e14ea4b62dad79423c47cb037254/raw/bingcn-cookie-v4.js") with tag="Cookie · BingCN 抓Cookie", img_url="https://www.bing.com/favicon.ico", timeout=30
+request if ${url} ~= /^https:\/\/cn\.bing\.com\/(?:$|search(?:\?|$))/i then script("https://gist.githubusercontent.com/onshine/3c11e14ea4b62dad79423c47cb037254/raw/bingcn-cookie-v4.js") with enable=${bing_cookie}, tag="Cookie · BingCN 抓Cookie", img_url="https://www.bing.com/favicon.ico", timeout=30
 
 [Rule]
 # 车来了自己的广告与埋点（不需要 MITM）
