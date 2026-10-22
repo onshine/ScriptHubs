@@ -98,7 +98,10 @@ if (fail.length) lines.push(`失败:${fail.join("、")}`);
 lines.push(...ok);
 if (unused) lines.push(`未使用 ${unused} 个`);
 if (!lines.length) lines.push("暂无记录,签到脚本运行一次后会自动登记");
-$.msg($.name, counts.join(" · "), lines.join("\n"));
+$.log(`[汇总] 成功 ${ok.length} / 需重抓 ${cookie.length} / 失败 ${fail.length} / 未使用 ${unused}`);
+// 标题为空时 Loon 可能不弹通知，给个兜底
+const title = counts.length ? counts.join(" · ") : "暂无签到记录";
+$.msg($.name || "签到汇总", title, lines.join("\n"));
 $.done();
 
 // 成功记录里去掉「签到成功」前缀,只留奖励;没有奖励时写「今日已签」/「签到成功」
@@ -129,5 +132,6 @@ function Env(s) {
         if (this.isQuanX()) return $prefs.valueForKey(k);
         return null;
     };
-    this.done = (v = {}) => { if (typeof $done !== "undefined") $done(v); };
+    // Loon 对 $done({}) 的类型处理不稳定，无参完成
+    this.done = (v) => { if (typeof $done !== "undefined") (typeof $loon !== "undefined" || v === undefined) ? $done() : $done(v); };
 }
