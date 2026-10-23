@@ -1,7 +1,7 @@
 /***************************************************************
  *  车来了 去广告  |  Loon http-response 脚本
  *  ------------------------------------------------------------
- *  SCRIPT_VERSION : R1.0.2
+ *  SCRIPT_VERSION : R1.0.3
  *  适配           : 车来了 iOS App（*.chelaile.net.cn / *.chelaileapp.cn 系接口）
  *  能力           : 去开屏广告、去插屏广告、去首页金刚位推广、去详情页信息流、
  *                   去公告/活动弹窗、去 LED 天气条、清空广告 SDK 投放任务
@@ -29,7 +29,7 @@
  *    · 所有开关来自插件 [Argument]，未传参时按默认值工作
  ***************************************************************/
 
-const SCRIPT_VERSION = "R1.0.2";
+const SCRIPT_VERSION = "R1.0.3";
 
 /* ------------------------------------------------------------------
  * 0. 开关与参数
@@ -46,6 +46,14 @@ const DEFAULTS = {
 
 function readArgs() {
   const cfg = Object.assign({}, DEFAULTS);
+  // Loon v2 的 {${a}, ${b}} 会把参数包成对象；旧写法是字符串。两种都接。
+  if ($argument && typeof $argument === "object") {
+    for (const k of Object.keys(DEFAULTS)) {
+      const v = $argument[k] !== undefined ? $argument[k] : $argument["ads_" + k];
+      if (v !== undefined) cfg[k] = v === "false" ? false : !!v;
+    }
+    return cfg;
+  }
   const raw = typeof $argument === "string" ? $argument : "";
   if (!raw) return cfg;
 

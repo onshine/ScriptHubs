@@ -1,7 +1,7 @@
 /***************************************************************
  *  车来了 · 每日签到（7天连续签）  |  Loon http-request + cron 脚本
  *  ------------------------------------------------------------
- *  SCRIPT_VERSION : R1.0.12
+ *  SCRIPT_VERSION : R1.0.13
  *  适配           : 车来了 iOS App 7.6.6（web.chelaile.net.cn/api/op-activity-api/daily-act/*）
  *
  *  R1.0.12 变更：
@@ -108,7 +108,7 @@
  *    · 任何异常一律不写坏数据、不误报成功
  ***************************************************************/
 
-const SCRIPT_VERSION = "R1.0.12";
+const SCRIPT_VERSION = "R1.0.13";
 const NAME = "车来了签到";
 const STORE_KEY = "chelaile_checkin_cred";
 const WARN_KEY = "chelaile_checkin_warn";
@@ -263,7 +263,7 @@ function onCapture() {
   }
 
   const arg = readArg();
-  const WANT_CAPTURE_NOTIFY = String(arg.notify_on_capture) !== "false";   // 默认开
+  const WANT_CAPTURE_NOTIFY = String(arg.notify_on_capture !== undefined ? arg.notify_on_capture : arg.cl_notify_on_capture) !== "false";   // 默认开
 
   // 【诊断】首次命中时提示一次：用来区分「MITM 没生效」和「抓到了但解析不出凭证」
   {
@@ -327,10 +327,12 @@ function onCapture() {
  * ------------------------------------------------------------------ */
 async function onCron() {
   const arg = readArg();
-  const DEBUG = String(arg.debug) === "true";
+  const DEBUG = String(arg.debug) === "true" || String(arg.cl_debug) === "true";
   // 兜底那趟传 backup_silent：当天已签时静默（避免每天两条通知）
-  const BACKUP_SILENT = arg.backup_silent === true || String(arg.backup_silent) === "true";
-  const WANT_SIGNED_NOTIFY = !BACKUP_SILENT && String(arg.notify_when_signed) !== "false";
+  const BACKUP_SILENT = arg.backup_silent === true || String(arg.backup_silent) === "true"
+    || arg.cl_backup_silent === true || String(arg.cl_backup_silent) === "true";
+  const WANT_SIGNED_NOTIFY = !BACKUP_SILENT
+    && String(arg.notify_when_signed !== undefined ? arg.notify_when_signed : arg.cl_notify_when_signed) !== "false";
   log(`脚本版本 ${SCRIPT_VERSION}  通知环境: ${notifyEnv()}`);
 
   // 频率自检：cron 写错（最常见是把「分 时」顺序搞反、或用逗号当分隔符）会导致一天跑几十次。
@@ -340,11 +342,11 @@ async function onCron() {
   // 凭证优先级：Argument 手填 > 抓包存储
   const saved = storeRead();
   const cred = {
-    udid: argVal(arg.udid) || (saved && saved.udid) || "",
-    accountId: argVal(arg.accountId) || (saved && saved.accountId) || "",
-    secret: argVal(arg.secret) || (saved && saved.secret) || "",
+    udid: argVal(arg.udid) || argVal(arg.cl_udid) || (saved && saved.udid) || "",
+    accountId: argVal(arg.accountId) || argVal(arg.cl_accountId) || (saved && saved.accountId) || "",
+    secret: argVal(arg.secret) || argVal(arg.cl_secret) || (saved && saved.secret) || "",
     // s 只要非空即可（实测填 1 也能签到成功），所以给个默认值兜底
-    s: argVal(arg.s) || (saved && saved.s) || "1",
+    s: argVal(arg.s) || argVal(arg.cl_s) || (saved && saved.s) || "1",
   };
   if (!cred.udid || !cred.accountId) {
     const msg = "缺少凭证。请先打开车来了 App → 进入「每日签到」页一次（脚本会自动抓取），"
