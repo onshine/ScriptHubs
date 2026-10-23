@@ -36,7 +36,7 @@ youpin_cookie = switch,false,tag=　└ 取 Cookie,desc=要抓时才开；抓完
 youpin_cron = input,"18 5 * * *",tag=　└ 签到时间,desc=默认 18 5 * * *，可改
 lhtj_app = switch,true,tag=【龙湖天街 App】签到,desc=签到开关，默认 21 5 * * *
 lhtj_app_cookie = switch,false,tag=　└ 取 Cookie,desc=要抓时才开；抓完关掉
-lhtj_app_cron = input,"21 5 * * *",tag=　└ 签到时间,desc=默认 21 5 * * *，可改
+lhtj_app_cron = input,"7-59/19 8-10 * * *",tag=　└ 签到时间,desc=默认 7-59/19 8-10 * * *（8–10 点每 19 分钟一次，脚本内部再随机选一分钟真正打卡）；只给一次固定时间会导致当天静默跳过
 qqmusic = switch,true,tag=【QQ音乐】签到与任务,desc=签到开关；三条任务各用下面三个时间
 qqmusic_cookie = switch,false,tag=　└ 取 Cookie,desc=要抓时才开；抓完关掉
 qqmusic_task_cron = input,"24 5 * * *",tag=　└ QQ音乐每日任务时间,desc=默认 24 5 * * *，可改
@@ -116,7 +116,7 @@ linli_cookie = switch,false,tag=　└ 取 Cookie,desc=要抓时才开；抓完�
 linli_cron = input,"36 6 * * *",tag=　└ 签到时间,desc=默认 36 6 * * *，可改
 teld = switch,true,tag=【特来电】签到,desc=签到开关，默认 39 6 * * *
 teld_cookie = switch,false,tag=　└ 取 Cookie,desc=要抓时才开；抓完关掉
-teld_cron = input,"39 6 * * *",tag=　└ 签到时间,desc=默认 39 6 * * *，可改
+teld_cron = input,"0-59/19 8-10 * * *",tag=　└ 签到时间,desc=默认 0-59/19 8-10 * * *（8–10 点每 19 分钟一次，脚本内部再随机选一分钟真正打卡）；只给一次固定时间会导致当天静默跳过
 songshan = switch,true,tag=【松山棉店】签到,desc=签到开关，默认 42 6 * * *
 songshan_cookie = switch,false,tag=　└ 取 Cookie,desc=要抓时才开；抓完关掉
 songshan_cron = input,"42 6 * * *",tag=　└ 签到时间,desc=默认 42 6 * * *，可改
