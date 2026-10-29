@@ -1,6 +1,6 @@
 /**
  * AgentRouter · 每日登录签到，查看奖励、余额与累计消耗
- * 版本: 2026-10-21.r8.4
+ * 版本: 2026-10-21.r8.5
  * 更新: 同步上游 2026-10-20.r7（签到状态登记、全角＄奖励识别、
  *       BoxJS 回退、统一通知合并）；保留多账号随机等待 0～300 秒；
  *       保留 Loon 无参 $done 兼容处理。
@@ -49,7 +49,7 @@ const $ = new Env("AgentRouter");
 // 签到合集开启「统一通知」时不单独弹通知,结果由签到汇总统一发送
 $.merge = typeof $argument === "object" && !!$argument && $argument.merge === true;
 if ($.merge) $.msg = (...a) => console.log(a.filter((x) => typeof x === "string" && x).join("\n"));
-const SCRIPT_VERSION = "2026-10-21.r8.4";
+const SCRIPT_VERSION = "2026-10-21.r8.5";
 $.log(`[INFO] 脚本版本 ${SCRIPT_VERSION}`);
 
 const USER_KEY = "agentrouter_username";
@@ -342,9 +342,19 @@ function Env(s) {
     this.isLoon = () => typeof $loon !== "undefined";
     this.log = (...a) => console.log(a.join("\n"));
     this.msg = (t = this.name, s = "", b = "") => {
-        if (this.isSurge() || this.isLoon()) $notification.post(t, s, b);
-        else if (this.isQuanX()) $notify(t, s, b);
+        // 先把内容写进日志，再尝试推送：日志里有没有这一段，是判断「脚本有没有走到发通知」的关键
         console.log(["", `====📣${t}====`, s, b].filter(Boolean).join("\n"));
+        try {
+            if (typeof $notification !== "undefined" && $notification && typeof $notification.post === "function") {
+                $notification.post(t, s, b);
+            } else if (typeof $notify === "function") {
+                $notify(t, s, b);
+            } else {
+                console.log("⚠️ 通知接口不可用，仅写日志");
+            }
+        } catch (e) {
+            console.log("⚠️ 通知发送失败: " + (e && e.message ? e.message : e));
+        }
     };
     this.getdata = (k) => {
         if (this.isSurge() || this.isLoon()) return $persistentStore.read(k);

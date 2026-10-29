@@ -243,7 +243,7 @@ cron ${pan1_cron} then script("https://raw.githubusercontent.com/MaYIHEI/papercl
 request if ${url} ~= /^https:\/\/pan1\.me\/(?:\?|$)/i then script("https://raw.githubusercontent.com/MaYIHEI/paperclip/refs/heads/main/app/pan1/pan1.js") with enable=${pan1_cookie}, tag="Cookie · 123社区", img_url="https://raw.githubusercontent.com/MaYIHEI/pin/refs/heads/main/app/pan1.png"
 
 # ---- 【AgentRouter】签到 ----
-cron ${agentrouter_cron} then script("https://raw.githubusercontent.com/onshine/ScriptHubs/main/agentrouter/agentrouter.js", {${username}, ${password}, ${accounts}, ${debug}}) with tag="22 AgentRouter签到·onshine版", img_url="https://raw.githubusercontent.com/MaYIHEI/paperclip/refs/heads/main/app/agentrouter/icon.png", timeout=300, enable=${agentrouter}
+cron ${agentrouter_cron} then script("https://raw.githubusercontent.com/onshine/ScriptHubs/main/agentrouter/agentrouter.js", {${username}, ${password}, ${accounts}, ${debug}}) with tag="22 AgentRouter签到·onshine版", img_url="https://raw.githubusercontent.com/MaYIHEI/paperclip/refs/heads/main/app/agentrouter/icon.png", timeout=900, enable=${agentrouter}
 
 # ---- 【网上国网】签到 ----
 cron ${sgcc_cron} then script("https://raw.githubusercontent.com/onshine/ScriptHubs/main/sgcc/sgcc.js", {${sgcc_phone}, ${sgcc_password}, ${sgcc_sms}, ${sgcc_debug}}) with tag="23 网上国网签到·onshine版", img_url="https://raw.githubusercontent.com/MaYIHEI/pin/refs/heads/main/app/sgcc.png", timeout=60, enable=${sgcc}
