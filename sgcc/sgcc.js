@@ -41,7 +41,7 @@
  */
 
 const $ = new Env("网上国网");
-const SCRIPT_VERSION = "2026-10-21.r8"; // 改一次 +1,确认拉到最新版
+const SCRIPT_VERSION = "2026-10-21.r9"; // 改一次 +1,确认拉到最新版
 $.log(`[INFO] 脚本版本 ${SCRIPT_VERSION}`);
 
 const KEY_PHONE = "sgcc_phone";       // 账号(手机号)
@@ -50,6 +50,7 @@ const KEY_SMS = "sgcc_sms";           // 新设备短信验证码(首次登录�
 const KEY_SESS = "sgcc_session";      // 登录凭证 {user,token,userId,province,exp}
 const KEY_DEV = "sgcc_device";        // 模拟设备 {seed,boot,install,tok}
 const KEY_PEND = "sgcc_sms_pending";  // 已发验证码 {user,codeKey,ts,used}
+const KEY_RISK = "sgcc_risk_until";  // 风控冷却截止时间戳：命中 RK 码后短时间内不再请求
 const KEY_SMS_DAY = "sgcc_sms_day";   // 当天已发验证码次数 {date,count}，防止反复触发短信
 const P_SIGN = "osg-omgmt1042/member/m1/0103514";
 const P_GOLD = "osg-omgmt1042/member/c1/q104051";
@@ -191,12 +192,45 @@ async function main() {
   }
   if (!user || !pass) { saveStatus("cookie", "缺少账号密码"); $.msg("⚠️ 网上国网签到", "缺少账号密码", "在 Loon 插件设置或 BoxJS 填写网上国网手机号和密码"); return; }
 
+  // 风控冷却：命中 RK001/RK008 这类风控码后，短时间内反复请求只会加重封禁
+  const riskUntil = Number($.getdata(KEY_RISK) || 0);
+  if (riskUntil > Date.now()) {
+    const mins = Math.ceil((riskUntil - Date.now()) / 60000);
+    $.log(`[INFO] 风控冷却中，还有 ${mins} 分钟再试（期间不发起任何请求）`);
+    saveStatus("fail", `风控冷却中(${mins}分钟)`);
+    return;
+  }
+
   const saved = getJ(KEY_SESS);
-  let sess = await ensureLogin(false), d;
+  let sess, d;
+  try {
+    sess = await ensureLogin(false);
+  } catch (e) {
+    const isRisk = /^RK\d+/i.test(String(e.code || "")) || /RK\d+/.test(String(e.message || ""));
+    if (isRisk) {
+      $.setdata(String(Date.now() + 30 * 60000), KEY_RISK);
+      saveStatus("fail", "国网风控拦截 " + (e.code || ""));
+      $.msg("⚠️ 网上国网签到", "国网风控拦截",
+        `登录接口返回 ${e.code || ""}（风控/超时）。已暂停 30 分钟。\n`
+        + "常见原因：短时间内多次运行、或请求走了代理。稍后自动重试即可。");
+      return;
+    }
+    throw e;
+  }
   try { d = await signin(sess); }
   catch (e) {
     // 凭证失效时签到接口回 RK001(查询接口才回 -200/-201);用的是旧凭证才重登一次
-    const stale = e.code === "-200" || e.code === "-201" || /RK0\d/.test(e.message || "");
+    // RK001/RK008 是风控码，不是凭证过期：重登只会多打一次接口，让封禁更重
+    const isRisk = /^RK\d+/i.test(String(e.code || "")) || /RK\d+/.test(String(e.message || ""));
+    if (isRisk) {
+      $.setdata(String(Date.now() + 30 * 60000), KEY_RISK);
+      saveStatus("fail", "国网风控拦截 " + (e.code || ""));
+      $.msg("⚠️ 网上国网签到", "国网风控拦截",
+        `接口返回 ${e.code || ""}（风控/超时）。已暂停 30 分钟，期间不会再发起请求。\n`
+        + "常见原因：短时间内多次运行、或请求走了代理。稍后自动重试即可，不要连续手动运行。");
+      return;
+    }
+    const stale = e.code === "-200" || e.code === "-201";
     if (!stale || !saved || saved.token !== sess.token) throw e;
     $.log(`[INFO] 登录凭证失效(${e.code}),重新登录`);
     sess = await ensureLogin(true); d = await signin(sess);
