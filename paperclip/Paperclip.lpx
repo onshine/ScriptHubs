@@ -333,6 +333,8 @@ cron ${bing_cron} then script("https://gist.githubusercontent.com/onshine/02e4a4
 request if ${url} ~= /^https:\/\/cn\.bing\.com\/(?:$|search(?:\?|$))/i then script("https://gist.githubusercontent.com/onshine/3c11e14ea4b62dad79423c47cb037254/raw/bingcn-cookie-v4.js") with enable=${bing_cookie}, tag="Cookie · BingCN 抓Cookie", img_url="https://www.bing.com/favicon.ico", timeout=30
 
 [Rule]
+# 网上国网：强制直连（走代理出口会触发 RK001 风控）
+DOMAIN-SUFFIX, sgcc.com.cn, DIRECT
 # 车来了自己的广告与埋点（不需要 MITM）
 DOMAIN, ad.chelaile.net.cn, REJECT
 DOMAIN, atrace.chelaile.net.cn, REJECT
