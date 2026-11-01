@@ -41,7 +41,7 @@
  */
 
 const $ = new Env("网上国网");
-const SCRIPT_VERSION = "2026-10-21.r7"; // 改一次 +1,确认拉到最新版
+const SCRIPT_VERSION = "2026-10-21.r8"; // 改一次 +1,确认拉到最新版
 $.log(`[INFO] 脚本版本 ${SCRIPT_VERSION}`);
 
 const KEY_PHONE = "sgcc_phone";       // 账号(手机号)
@@ -50,6 +50,7 @@ const KEY_SMS = "sgcc_sms";           // 新设备短信验证码(首次登录�
 const KEY_SESS = "sgcc_session";      // 登录凭证 {user,token,userId,province,exp}
 const KEY_DEV = "sgcc_device";        // 模拟设备 {seed,boot,install,tok}
 const KEY_PEND = "sgcc_sms_pending";  // 已发验证码 {user,codeKey,ts,used}
+const KEY_SMS_DAY = "sgcc_sms_day";   // 当天已发验证码次数 {date,count}，防止反复触发短信
 const P_SIGN = "osg-omgmt1042/member/m1/0103514";
 const P_GOLD = "osg-omgmt1042/member/c1/q104051";
 // Loon 插件设置优先,没填则读 BoxJS
@@ -133,7 +134,7 @@ async function login(code, codeKey) {
   let ui = biz.userInfo; if (Array.isArray(ui)) ui = ui[0]; ui = ui || {};
   const life = Number(biz.tokenExpireTime) || 1296000;
   const sess = { user, token: String(biz.token), userId: String(ui.userId || biz.userId || "0"), province: String(ui.addressProvince || ""), exp: Date.now() + life * 1000 };
-  setJ(KEY_SESS, sess); setJ(KEY_PEND, null); $.setdata("", KEY_SMS);
+  setJ(KEY_SESS, sess); setJ(KEY_PEND, null); $.setdata("", KEY_SMS); $.setdata("", KEY_SMS_DAY);
   $.log(`[INFO] 登录成功,凭证有效 ${Math.round(life / 86400)} 天`);
   return sess;
 }
@@ -148,13 +149,25 @@ async function ensureLogin(force) {
   catch (e) {
     if (e.code !== "4006") throw e;
     // 新设备验证:发短信,等用户把验证码填进 BoxJS 再跑一次
-    if (!pendOk || Date.now() - pend.ts > 60000) {
+    // 原逻辑是「距上次发送超过 60 秒就再发一条」——脚本被反复触发时会连发短信。
+    // 改成：15 分钟内绝不重发；同一天最多 3 条。
+    const todayKey = new Date(Date.now() + 8 * 3600000).toISOString().slice(0, 10);
+    const dayRec = getJ(KEY_SMS_DAY);
+    const dayCount = dayRec && dayRec.date === todayKey ? Number(dayRec.count) || 0 : 0;
+    const canSend = !pendOk && dayCount < 3;
+    if (canSend) {
       const d = await call(P_SMS, { uscInfo: { tenant: "state_grid", member: "2202", devciceId: "000000", devciceName: "sdk_gphone64_arm64", devciceIp: "127.0.0.1" }, quInfo: { voiceCodeFlag: false, account: user, sendType: 0, businessType: "logindevice" } });
       const ck = d.bizrt && d.bizrt.codeKey;
       if (!ck) throw new SgError("sms", "验证码发送失败");
       setJ(KEY_PEND, { user, codeKey: String(ck), ts: Date.now(), used: sms });
+      setJ(KEY_SMS_DAY, { date: todayKey, count: dayCount + 1 });
+      throw new SgError("4006", `验证码已发到 ${mask},15 分钟内填进插件设置或 BoxJS 的「短信验证码」后再手动运行一次`);
     }
-    throw new SgError("4006", `验证码已发到 ${mask},15 分钟内填进插件设置或 BoxJS 的「短信验证码」后再手动运行一次`);
+    const waitMin = pendOk ? Math.max(1, Math.ceil((15 * 60000 - (Date.now() - pend.ts)) / 60000)) : 0;
+    const why = pendOk
+      ? `${waitMin} 分钟前刚发过验证码，为避免重复打扰不再重发`
+      : `今天已发 ${dayCount} 条验证码，已达每日上限(3 条)`;
+    throw new SgError("4006", `${why}。请先在「网上国网」App 用手机号登录一次，之后本脚本会复用登录凭证。`);
   }
 }
 
