@@ -1,0 +1,9 @@
+#!name=网上国网现有凭证单次验证
+#!desc=R1.0.0 · 手动验证现有国网缓存，仅向官方网关查询一次签到金余额。不是纯本地体检，会发送一笔真实请求，仍可能被风控拒绝。无需填写账号或验证码；不登录、不发短信、不签到、不生成新设备、不修改存储。遇错立即停止，不循环重试。请只运行一次，将脱敏JSON结果发给 Minis。缓存过期、字段不全或冷却中会保持零请求；不替换原签到任务。更新时请刷新脚本缓存或删除本验证插件重新添加。
+#!author=Minis（验证入口）；MaYIHEI / 脑瓜 / stevenjoezhang（参考协议）
+#!homepage=https://github.com/onshine/ScriptHubs/tree/main/sgcc
+#!tag=诊断
+#!loon_version=3.5.1(983)
+
+[Script]
+generic then script("https://raw.githubusercontent.com/onshine/ScriptHubs/main/sgcc/sgcc-session-check.js") with tag="网上国网现有凭证单次验证", timeout=60

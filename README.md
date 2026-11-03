@@ -16,7 +16,7 @@ Loon / Quantumult X / Surge 签到与定时脚本合集。
 - [chelaile](chelaile/) — 车来了去广告（Loon 插件）。R1.0.2，去开屏广告与应用内广告；核心是清洗启动配置 `appToggle/getStatus` 让 App 不拉开屏素材，响应体外壳 `**YGKJ...YGKJ##` 动态保留不写死，首页金刚位按推广特征动态剔除；含 `block_httpdns` 防绕过开关。
 - [wetalk](wetalk/) — WeTalk 签到 + 视频奖励的 **Loon 外壳**。R1.0.0，脚本本体引用上游 `CaoXiaoMann/XiaoMan`（不内置）；补上作者没给的 Loon 配置，并把 cron 做成 Argument 可自定义。
 - [pingme](pingme/) — PingMe 签到 + 视频奖励的 **Loon 外壳**。R1.0.0，脚本本体引用上游 `fmz200/wool_scripts`（不内置）；把流传版本里写死的 `cron "30 8,20 * * *"` 改成 Argument 可自定义，并补上它引用却没声明的 `PingMe` 开关。
-- [sgcc](sgcc/) — 网上国网（国家电网95598）签到，内置参考脚本，当前运行版 `2026-10-21.r9`。新增独立手动诊断插件 **SGCC_Diagnostic.plugin（R1.0.1）**：无需账号和验证码，只读本地凭据/设备状态，不登录、不发短信、不请求国网、不输出凭据。**持续 RK001 尚未确认根因或修复**；本地有效期与可解密错误响应不证明服务端认可。
+- [sgcc](sgcc/) — 网上国网（国家电网95598）签到，内置参考脚本，当前运行版 `2026-10-21.r9`。两个独立手动诊断入口：**SGCC_Diagnostic.plugin（R1.0.1）** 零联网本地体检；**SGCC_SessionCheck.plugin（R1.0.0）** 复用现有缓存，向国网查询一次余额。均不登录、不发短信、不修改缓存、不输出凭据；单次查询需另行确认后手动运行。**持续 RK001 尚未确认根因或修复**，本地有效期与可解密错误响应不证明服务端认可。
 - [chelaile-checkin](chelaile-checkin/) — 车来了每日签到（Loon 插件）。R1.0.7，`signin` 与 `config` 鉴权不同：签到**必须**带 `secret` + `s`（只带 `udid`+`accountId` 一律 `0002 非法请求`）；`signature`/`nonce`/`h5TimeStamp` 服务端并不校验。`http-request` 钩子自动抓凭证 + cron 签到，按 `signDate` 判断当日是否已签；日志与通知里的凭证一律脱敏。
 - [sub-store-deploy](sub-store-deploy/) — 自建 Sub-Store 部署套件。R1.0.0，`sub-store.sh` 一键部署/更新，默认写好前后端同源路径与 CORS 白名单（治「网页端 403 CORS origin not allowed / 列表空白」），含端口链、前端路径、CORS 实测自检。
 - [paperclip](paperclip/) — Paperclip 全套签到脚本的 **Loon 外壳（签到 + 取 Cookie 合一，单插件）**。R1.1.0，脚本本体引用上游 `MaYIHEI/paperclip`（不内置）；**每条签到规则下面紧跟它自己的 Cookie 抓取规则**，上开关管签到（默认开）、下开关管抓取（默认关）。每个脚本签到时间可改、汇总时间可改，修掉上游小米抽奖六段 cron 永不触发，MITM 改 `%APPEND%` 不覆盖其它插件，补特来电（gist 原文未改）、松山棉店、笔笔省、CASETiFY。⚠️ 与作者原插件二选一。
