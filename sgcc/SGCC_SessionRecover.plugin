@@ -1,0 +1,15 @@
+#!name=网上国网会话恢复
+#!desc=R1.0.0 · 仅在确认当前会话被服务端拒绝后使用。保留原设备 seed 与缓存令牌，只重新建立登录会话，不签到、不改设备身份、不循环重登。每次手动运行最多一次登录；如需短信验证码，一天最多发一条，并把验证码填进本插件设置后再运行一次。手机号、密码、验证码只填在本插件设置里，不要发到聊天。若返回 sms_required 请先填验证码；若原签到脚本的风控冷却仍在生效或设备缓存已过期，本入口会零请求停止。更新时请刷新脚本缓存或删除本入口重新添加。
+#!author=Minis（恢复入口）；MaYIHEI / 脑瓜 / stevenjoezhang（参考协议）
+#!homepage=https://github.com/onshine/ScriptHubs/tree/main/sgcc
+#!tag=诊断
+#!loon_version=3.5.1(983)
+
+[Argument]
+phone = input,"",tag=手机号,desc=与现有会话同一账号；留空则读已保存的 sgcc_phone
+password = input,"",tag=密码,desc=仅用于本次重新登录；留空则读已保存的 sgcc_password。⚠️ 连续输错 5 次会锁定 30 分钟
+sms = input,"",tag=短信验证码,desc=仅当返回 sms_required 时填写收到的 6 位验证码，再运行一次；成功后自动清空
+force = switch,false,tag=强制重建,desc=仅在已确认没有可用旧会话时打开；否则本入口拒绝在账号无法核对时重登
+
+[Script]
+generic then script("https://raw.githubusercontent.com/onshine/ScriptHubs/main/sgcc/sgcc-session-recover.js", {${phone}, ${password}, ${sms}, ${force}}) with tag="网上国网会话恢复", timeout=90
