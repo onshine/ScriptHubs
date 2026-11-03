@@ -72,11 +72,12 @@ password = input,"",tag=　└ 密码（onshine版）,desc=网站登录密码
 accounts = input,"",tag=　└ 多账号 JSON（onshine版）,desc=选填，填了优先用列表；格式见插件主页 README
 debug = switch,false,tag=　└ 调试日志（onshine版）
 agentrouter_cron = input,"57 5 * * *",tag=　└ 签到时间,desc=默认 57 5 * * *，可改
-sgcc = switch,true,tag=【网上国网 · onshine 本地版】签到,desc=用本仓库 sgcc/sgcc.js（手机号+密码自动登录，无需抓包），默认 00 6 * * *
+sgcc = switch,true,tag=【网上国网 · onshine 本地版】签到,desc=用本仓库 sgcc/sgcc-r10.js（手机号+密码自动登录，无需抓包），默认 00 6 * * *
 sgcc_phone = input,"",tag=　└ 手机号,desc=网上国网登录手机号
 sgcc_password = input,"",tag=　└ 密码,desc=登录密码；⚠️ 连错 5 次锁 30 分钟，填错先改对再运行
 sgcc_sms = input,"",tag=　└ 短信验证码,desc=仅首次登录（新设备验证）填，填完手动运行一次
 sgcc_debug = switch,false,tag=　└ 调试日志
+sgcc_recover = switch,true,tag=　└ 会话被挤掉时自动恢复,desc=开：签到回 RK001 且本次复用旧会话时自动重登一次，每天最多一次；关：只提示不重登
 sgcc_cron = input,"00 6 * * *",tag=　└ 签到时间,desc=默认 00 6 * * *，可改
 baidunetdisk = switch,true,tag=【百度网盘】成长值签到,desc=签到开关，默认 03 6 * * *
 baidunetdisk_cookie = switch,false,tag=　└ 取 Cookie,desc=要抓时才开；抓完关掉
@@ -246,7 +247,7 @@ request if ${url} ~= /^https:\/\/pan1\.me\/(?:\?|$)/i then script("https://raw.g
 cron ${agentrouter_cron} then script("https://raw.githubusercontent.com/onshine/ScriptHubs/main/agentrouter/agentrouter.js", {${username}, ${password}, ${accounts}, ${debug}}) with tag="22 AgentRouter签到·onshine版", img_url="https://raw.githubusercontent.com/MaYIHEI/paperclip/refs/heads/main/app/agentrouter/icon.png", timeout=900, enable=${agentrouter}
 
 # ---- 【网上国网】签到 ----
-cron ${sgcc_cron} then script("https://raw.githubusercontent.com/onshine/ScriptHubs/main/sgcc/sgcc.js", {${sgcc_phone}, ${sgcc_password}, ${sgcc_sms}, ${sgcc_debug}}) with tag="23 网上国网签到·onshine版", img_url="https://raw.githubusercontent.com/MaYIHEI/pin/refs/heads/main/app/sgcc.png", timeout=60, enable=${sgcc}
+cron ${sgcc_cron} then script("https://raw.githubusercontent.com/onshine/ScriptHubs/main/sgcc/sgcc-r10.js", {${sgcc_phone}, ${sgcc_password}, ${sgcc_sms}, ${sgcc_debug}, ${sgcc_recover}}) with tag="23 网上国网签到·onshine版", img_url="https://raw.githubusercontent.com/MaYIHEI/pin/refs/heads/main/app/sgcc.png", timeout=90, enable=${sgcc}
 
 # ---- 【百度网盘】成长值签到 ----
 cron ${baidunetdisk_cron} then script("https://raw.githubusercontent.com/MaYIHEI/paperclip/refs/heads/main/app/baidunetdisk/baidunetdisk.js") with tag="24 百度网盘签到", img_url="https://raw.githubusercontent.com/MaYIHEI/pin/refs/heads/main/app/baidunetdisk.png", timeout=60, enable=${baidunetdisk}
