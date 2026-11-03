@@ -1,0 +1,9 @@
+#!name=网上国网本地体检
+#!desc=R1.0.1 · 只检查 Loon 已保存的国网凭据和设备缓存状态。无需填写手机号、密码或验证码；不登录、不发短信、不请求国网、不修改存储。仅手动运行，不含定时任务，不替换原签到插件。输出只包含状态与相对时间，可复制结果发给 Minis 分析。脚本首次下载需要联网，下载不携带国网凭据。更新时请刷新脚本缓存，或删除本诊断插件重新添加。
+#!author=Minis
+#!homepage=https://github.com/onshine/ScriptHubs/tree/main/sgcc
+#!tag=诊断
+#!loon_version=3.5.1(983)
+
+[Script]
+generic then script("https://raw.githubusercontent.com/onshine/ScriptHubs/main/sgcc/sgcc-local-check.js") with tag="网上国网本地体检", timeout=10
