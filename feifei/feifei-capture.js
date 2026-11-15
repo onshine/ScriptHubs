@@ -1,8 +1,13 @@
 /*
- * feifei-capture.js — R1.0.3 —— 自动抓取「飞飞币」接口的登录凭证（Authorization）
+ * feifei-capture.js — R1.0.4 —— 自动抓取「飞飞币」接口的登录凭证（Authorization）
  *
  * 由 Feifei.plugin 的 request 规则触发，把 Authorization 写进 $persistentStore 的
  * feifei_token，feifei.js 直接复用。抓包只在本机、只存 Loon 本地存储。
+ *
+ * R1.0.4 自检升级（★ 用来证明 MITM 到底通不通，不需要打开 App）：
+ *   · 新增「页面命中」分支：用 Safari 打开 https://xxj.xunfei.cn/h5-reward-shopping/
+ *     若收到「MITM 已生效」通知 → 证书/解密这一层没问题，问题在 App 那条链路
+ *     若什么都没收到 → MITM 确实没生效（证书未信任 / 主机名不在列表 / 未重载配置）
  *
  * R1.0.3 自检升级：
  *   · 每命中一次就写心跳（feifei_last_hit / feifei_last_url），签到脚本读它来判断
@@ -62,13 +67,19 @@
   }
   console.log("[feifei-capture] hit " + base);
 
-  /* ---- 没找到 Authorization：说明 MITM 通了但位置不对，每天提示一次 ---- */
+  /* ---- 没找到 Authorization ---- */
   if (!auth) {
+    var isApi = /xunfeixxj\.com/.test(base);
     console.log("[feifei-capture] 未找到 Authorization，header keys=" + Object.keys(h).join(","));
     if ($persistentStore.read(KEY_MISS) !== today()) {
       $persistentStore.write(today(), KEY_MISS);
-      notify("飞飞币 · 抓包自检", "命中接口但没有 Authorization",
-        "MITM 已生效，但这条请求里没有凭证。\n请在家长端「飞飞币」页面下拉刷新一次再试；若仍提示，说明这个页面的凭证另有来源。");
+      if (isApi) {
+        notify("飞飞币 · 自检", "命中接口但没有 Authorization",
+          "解密正常，但这条请求里没有凭证。\n在家长端「飞飞币」页面下拉刷新一次；仍如此就在插件里手填 Token。");
+      } else {
+        notify("飞飞币 · 自检", "MITM 已生效 ✅",
+          "已成功解密并命中页面请求：" + base + "\n说明证书与解密都没问题。\n→ 剩下的问题在 App 那条链路：确认你是在「装了 Loon 的这台设备」上打开的飞飞币页面。");
+      }
     }
     return finish();
   }

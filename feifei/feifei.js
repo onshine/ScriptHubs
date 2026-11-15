@@ -1,8 +1,9 @@
 /*
  * feifei.js —— 讯飞 AI 学习机「飞飞币」每日自动签到（Loon / Surge / Stash 通用脚本）
  *
- * 版本：R1.0.3
- * 更新：2026-11-15 R1.0.3 全链路日志（每步打印到 Loon 日志）+ 缺 Token 时自动读取抓包心跳，
+ * 版本：R1.0.4
+ * 更新：2026-11-15 R1.0.4 配合抓包自检：Safari 打开 H5 页面即可验证 MITM（见 README）。
+ *       R1.0.3 全链路日志（每步打印到 Loon 日志）+ 缺 Token 时自动读取抓包心跳，
  *       直接告诉你是「规则没触发」还是「触发但没取到凭证」。
  *       R1.0.2 抓凭证脚本加自检提示（命中/未命中都会说清楚），匹配放宽到 *.xunfeixxj.com。
  *       R1.0.1 插件改用 Loon 官方 v2 Script 语法（cron ${cron} 参数化，
@@ -19,7 +20,7 @@
  * 通知：Loon 系统通知 + 可选 Bark / Telegram
  */
 
-var SCRIPT_VERSION = "1.0.3";
+var SCRIPT_VERSION = "1.0.4";
 var API = "https://api.xunfeixxj.com";
 var UA = "Mozilla/5.0 (iPhone; CPU iPhone OS 16_6_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148";
 var KEY_TOKEN = "feifei_token";
