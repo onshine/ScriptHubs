@@ -1,8 +1,10 @@
 /*
  * feifei.js —— 讯飞 AI 学习机「飞飞币」每日自动签到（Loon / Surge / Stash 通用脚本）
  *
- * 版本：R1.0.5
- * 更新：2026-11-15 R1.0.5 Token 解析加固：从整段 JSON/配置文件里也能准确抠出 v01_ 凭证，
+ * 版本：R1.0.6
+ * 更新：2026-11-15 R1.0.6 收尾加固：无论成功/异常/卡住都一定会 $done() 并打「完成」日志，
+ *       不再出现 Loon 里一直显示「运行中」。
+ *       R1.0.5 Token 解析加固：从整段 JSON/配置文件里也能准确抠出 v01_ 凭证，
  *       自动去重、跳过无效项（之前把粘进来的整份 config.json 当成了 26 个账号）。
  *       R1.0.4 配合抓包自检：Safari 打开 H5 页面即可验证 MITM（见 README）。
  *       R1.0.3 全链路日志（每步打印到 Loon 日志）+ 缺 Token 时自动读取抓包心跳，
@@ -22,7 +24,7 @@
  * 通知：Loon 系统通知 + 可选 Bark / Telegram
  */
 
-var SCRIPT_VERSION = "1.0.5";
+var SCRIPT_VERSION = "1.0.6";
 var API = "https://api.xunfeixxj.com";
 var UA = "Mozilla/5.0 (iPhone; CPU iPhone OS 16_6_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148";
 var KEY_TOKEN = "feifei_token";
@@ -35,6 +37,18 @@ function storeRead(k) {
   catch (e) { return null; }
 }
 function tail(t) { return t ? "…" + String(t).slice(-4) : "(空)"; }
+
+var __finished = false;
+function finish(reason) {
+  if (__finished) return;
+  __finished = true;
+  log("完成" + (reason ? "（" + reason + "）" : ""));
+  try { $done(); } catch (e) { }
+}
+function safeNotify(title, sub, body) {
+  try { $notification.post(title, sub || "", body || ""); log("通知已提交: " + title); }
+  catch (e) { log("✗ 通知失败: " + (e && e.message ? e.message : e)); }
+}
 
 /* Loon v2 语法 script(url, {${a},${b}}) 传进来的是「位置数组」；
    旧式对象写法也兼容。 */
@@ -248,9 +262,9 @@ function notifyTG(title, content) {
   if (!accounts.length && String(arg.token || "").trim()) {
     var rawTok = String(arg.token || "").trim();
     log("✗ Token 栏有 " + rawTok.length + " 字符，但没解析出 v01_ 凭证");
-    $notification.post("飞飞币 · Token 无效", "没解析出有效凭证",
+    safeNotify("飞飞币 · Token 无效", "没解析出有效凭证",
       "Token 栏里有 " + rawTok.length + " 字符，但找不到 v01_ 开头的凭证。\n→ 只粘贴 Bearer v01_… 这一段就行，不用整份配置文件。");
-    $done();
+    finish("Token 无效");
     return;
   }
   if (!accounts.length) {
@@ -262,9 +276,9 @@ function notifyTG(title, content) {
       ? "规则已触发过，但没取到 Authorization。→ 到家长端「飞飞币」页面下拉刷新一次；仍不行就在插件里手填 Token。"
       : "规则从未触发，说明请求没被 MITM 解密。→ ①插件已启用 ②Loon 设置→MitM 开关开 + 证书已装 + iOS「证书信任设置」已信任 ③改完插件后把 VPN 开关关掉再打开。";
     log(advice);
-    $notification.post("飞飞币 · 缺 Token", "抓包心跳：" + (hitAt ? "有命中" : "从未命中"),
+    safeNotify("飞飞币 · 缺 Token", "抓包心跳：" + (hitAt ? "有命中" : "从未命中"),
       "最近命中接口：" + hitTxt + "\n\n" + advice);
-    $done();
+    finish("缺 Token");
     return;
   }
   var detailsN = Number(arg.details || 5);
@@ -282,14 +296,21 @@ function notifyTG(title, content) {
       });
   });
 
+  /* 看门狗：任何一步卡住（网络无回调等）也保证 30 秒内收尾 */
+  try { setTimeout(function () { finish("看门狗超时"); }, 30000); } catch (e) { }
+
   Promise.all(jobs).then(function (all) {
     var content = all.join("\n\n");
     var failed = /❌/.test(content);
     var title = "飞飞币签到" + (failed ? "（异常）" : "");
-    $notification.post(title, "", content);
-    Promise.all([notifyBark(title, content), notifyTG(title, content)]).then(function () { $done(); });
-  }).catch(function (e) {
-    $notification.post("飞飞币签到", "运行异常", String(e && e.message ? e.message : e));
-    $done();
+    log("结果: " + content.replace(/\n+/g, " / ").slice(0, 160));
+    safeNotify(title, "", content);
+    return Promise.all([notifyBark(title, content), notifyTG(title, content)]);
+  }).then(function () {
+    finish();
+  }, function (e) {
+    log("✗ 未预期异常: " + (e && e.message ? e.message : e));
+    safeNotify("飞飞币签到", "运行异常", String(e && e.message ? e.message : e));
+    finish("异常");
   });
 })();
