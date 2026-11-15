@@ -144,6 +144,17 @@ python3 feifei.py cron --remove
 Loon 只能看到**它自己所在那台手机**的流量。飞飞币页面如果是在**学习机平板**上打开的，
 或者家长端装在另一部手机上，那 Loon 永远抓不到——必须用装了 Loon 的这台设备的家长端 App 打开飞飞币。
 
+**0.9 最后一招：全量自检（用完记得删）**
+
+在第 0 步仍然毫无反应时，把这条临时加进插件 `[Script]` 末尾：
+
+```
+request if ${url} ~= /^https?:\/\//i then script("https://raw.githubusercontent.com/onshine/ScriptHubs/main/feifei/feifei-capture.js") with tag="全量自检", timeout=10
+```
+
+然后随便用 Safari 打开一个 https 网站。有通知＝Loon 在解密，只是主机名没覆盖到；
+依旧没有＝MITM 本身没生效（证书未信任或总开关没开），与插件无关。
+
 **1. MITM 三件套（缺一不可）**
 
 - 插件是启用状态（Loon → 配置 → 插件）
@@ -194,6 +205,11 @@ iOS 上进程会被挂起，建议用「快捷指令 → 个人自动化（每�
 ---
 
 ## 六、版本记录
+
+### R1.0.5（2026-11-15）
+- **Token 解析加固**：整份 `config.json`（含 `accounts` 数组）、`名字|token` 多行、纯 Token 三种写法都能正确识别；
+  自动去重、跳过无效碎片，不再把粘错的整份配置当成几十个账号（会连发几十次 401/483）
+- Token 栏有内容但抠不出 `v01_` 时，直接推「Token 无效 · 没解析出有效凭证」
 
 ### R1.0.4（2026-11-15）
 - 新增 **免 App 的 MITM 自检规则**：命中 `/h5-reward-shopping/` 页面请求即推「MITM 已生效 ✅」

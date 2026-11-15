@@ -1,8 +1,10 @@
 /*
  * feifei.js —— 讯飞 AI 学习机「飞飞币」每日自动签到（Loon / Surge / Stash 通用脚本）
  *
- * 版本：R1.0.4
- * 更新：2026-11-15 R1.0.4 配合抓包自检：Safari 打开 H5 页面即可验证 MITM（见 README）。
+ * 版本：R1.0.5
+ * 更新：2026-11-15 R1.0.5 Token 解析加固：从整段 JSON/配置文件里也能准确抠出 v01_ 凭证，
+ *       自动去重、跳过无效项（之前把粘进来的整份 config.json 当成了 26 个账号）。
+ *       R1.0.4 配合抓包自检：Safari 打开 H5 页面即可验证 MITM（见 README）。
  *       R1.0.3 全链路日志（每步打印到 Loon 日志）+ 缺 Token 时自动读取抓包心跳，
  *       直接告诉你是「规则没触发」还是「触发但没取到凭证」。
  *       R1.0.2 抓凭证脚本加自检提示（命中/未命中都会说清楚），匹配放宽到 *.xunfeixxj.com。
@@ -20,7 +22,7 @@
  * 通知：Loon 系统通知 + 可选 Bark / Telegram
  */
 
-var SCRIPT_VERSION = "1.0.4";
+var SCRIPT_VERSION = "1.0.5";
 var API = "https://api.xunfeixxj.com";
 var UA = "Mozilla/5.0 (iPhone; CPU iPhone OS 16_6_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148";
 var KEY_TOKEN = "feifei_token";
@@ -117,13 +119,39 @@ function normTok(t) {
   return /^bearer\s/i.test(t) ? t : "Bearer " + t;
 }
 
+function extractTokens(raw) {
+  var out = [], seen = {}, m;
+  var re = /v01_[A-Za-z0-9_\-\.]{20,}/g;
+  while ((m = re.exec(raw))) {
+    var t = "Bearer " + m[0];
+    if (!seen[t]) { seen[t] = 1; out.push({ name: "飞飞币", token: t }); }
+  }
+  return out;
+}
+
 function loadAccounts() {
   var raw = String(arg.token || "").trim();
-  if (!raw) raw = String($persistentStore.read(KEY_TOKEN) || "").trim();
+  var src = "插件参数";
+  if (!raw) { raw = String(storeRead(KEY_TOKEN) || "").trim(); src = "本地存储"; }
   if (!raw) return [];
-  return raw.split(/[\n;]+/).map(function (line) {
-    line = line.trim();
-    if (!line) return null;
+  log("token 来源=" + src + "，原始长度 " + raw.length + " 字符");
+
+  /* 1) 整份 JSON（含 accounts 数组）—— 直接从配置文件复制过来也能用 */
+  try {
+    var js = JSON.parse(raw);
+    if (js && js.accounts && js.accounts.length) {
+      var list = js.accounts.filter(function (a) { return a && a.enabled !== false; })
+        .map(function (a) { return { name: a.name || "飞飞币", token: normTok(a.token) }; })
+        .filter(function (a) { return /^Bearer v01_/.test(a.token); });
+      if (list.length) { log("按配置文件格式解析出 " + list.length + " 个账号"); return list; }
+    }
+  } catch (e) { }
+
+  /* 2) 「名字|token」多行/分号分隔 */
+  var lines = raw.split(/[\n;]+/).map(function (x) { return x.trim(); })
+    .filter(function (x) { return x; });
+  var out = [], seen = {};
+  lines.forEach(function (line) {
     var name = "飞飞币", tok = line;
     if (line.indexOf("|") > 0) {
       var p = line.split("|");
@@ -131,8 +159,17 @@ function loadAccounts() {
       tok = p.slice(1).join("|").trim();
     }
     tok = normTok(tok);
-    return tok ? { name: name, token: tok } : null;
-  }).filter(Boolean);
+    if (!/^Bearer v01_/.test(tok)) return;            // 跳过粘错的碎片
+    if (seen[tok]) return;                            // 去重
+    seen[tok] = 1;
+    out.push({ name: name, token: tok });
+  });
+  if (out.length) { log("按多行/分号格式解析出 " + out.length + " 个账号"); return out; }
+
+  /* 3) 兜底：正则从任意文本里抠 v01_ 凭证（粘了整份 JSON、说明文字也能用） */
+  out = extractTokens(raw);
+  log(out.length ? ("兜底正则从中抠出 " + out.length + " 个凭证") : "✗ 没解析出任何有效 Token");
+  return out;
 }
 
 function runOne(acc, detailsN, claimTasks) {
@@ -208,6 +245,14 @@ function notifyTG(title, content) {
 (function main() {
   var accounts = loadAccounts();
   log("账号数 " + accounts.length + "，明细条数 " + (arg.details || 5));
+  if (!accounts.length && String(arg.token || "").trim()) {
+    var rawTok = String(arg.token || "").trim();
+    log("✗ Token 栏有 " + rawTok.length + " 字符，但没解析出 v01_ 凭证");
+    $notification.post("飞飞币 · Token 无效", "没解析出有效凭证",
+      "Token 栏里有 " + rawTok.length + " 字符，但找不到 v01_ 开头的凭证。\n→ 只粘贴 Bearer v01_… 这一段就行，不用整份配置文件。");
+    $done();
+    return;
+  }
   if (!accounts.length) {
     var hitAt = Number(storeRead("feifei_last_hit") || 0);
     var hitUrl = String(storeRead("feifei_last_url") || "");
