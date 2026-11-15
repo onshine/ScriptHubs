@@ -1,8 +1,10 @@
 /*
  * feifei.js —— 讯飞 AI 学习机「飞飞币」每日自动签到（Loon / Surge / Stash 通用脚本）
  *
- * 版本：R1.0.0
- * 更新：2026-11-15 首个版本：每日签到、任务奖励领取、签到明细（近 7 天打卡图 + 最近收入流水）、
+ * 版本：R1.0.1
+ * 更新：2026-11-15 R1.0.1 插件改用 Loon 官方 v2 Script 语法（cron ${cron} 参数化，
+ *       签到时间可在插件设置页直接改）；参数改为位置数组解析，兼容对象写法。
+ *       R1.0.0 首个版本：每日签到、任务奖励领取、签到明细（近 7 天打卡图 + 最近收入流水）、
  *       Loon 通知 + Bark / Telegram、Token 自动抓取（feifei-capture.js）、登录态失效提示
  * 仓库：https://github.com/onshine/ScriptHubs
  *
@@ -14,16 +16,27 @@
  * 通知：Loon 系统通知 + 可选 Bark / Telegram
  */
 
-var SCRIPT_VERSION = "1.0.0";
+var SCRIPT_VERSION = "1.0.1";
 var API = "https://api.xunfeixxj.com";
 var UA = "Mozilla/5.0 (iPhone; CPU iPhone OS 16_6_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148";
 var KEY_TOKEN = "feifei_token";
 
 if (typeof $done === "undefined") { var $done = function () { }; } /* 便于本地/Node 测试 */
 console.log("[feifei] v" + SCRIPT_VERSION);
-var arg = {};
-try { arg = JSON.parse($argument || "{}") || {}; } catch (e) { arg = {}; }
-if (typeof $argument === "object" && $argument) arg = $argument;
+/* Loon v2 语法 script(url, {${a},${b}}) 传进来的是「位置数组」；
+   旧式对象写法也兼容。 */
+function readArg() {
+  var a;
+  try { a = typeof $argument === "undefined" ? {} : $argument; } catch (e) { a = {}; }
+  if (typeof a === "string") { try { a = JSON.parse(a); } catch (e) { return {}; } }
+  if (!a || typeof a !== "object") return {};
+  if (Array.isArray(a)) {
+    if (a.length === 1 && a[0] && typeof a[0] === "object" && !Array.isArray(a[0])) return a[0];
+    return { token: a[0], bark_url: a[1], tg_bot: a[2], tg_chat: a[3], details: a[4], claim_tasks: a[5] };
+  }
+  return a;
+}
+var arg = readArg();
 
 function headers(tok) {
   return {
@@ -187,7 +200,7 @@ function notifyTG(title, content) {
     return;
   }
   var detailsN = Number(arg.details || 5);
-  var claimTasks = String(arg.claim_tasks || "false") === "true";
+  var claimTasks = arg.claim_tasks === true || String(arg.claim_tasks || "false").toLowerCase() === "true";
 
   var jobs = accounts.map(function (acc) {
     return runOne(acc, detailsN, claimTasks)

@@ -1,24 +1,23 @@
-#!name=飞飞币每日签到（讯飞 AI 学习机）
-#!desc=讯飞 AI 学习机「飞飞币」自动签到 R1.0.0：每天定时签到、可选领取任务奖励，通知里带今日状态/连续签到/近 7 天打卡图和最近收入明细；打开家长端飞飞币页面即自动抓取 Token。签到时间改 [Script] 里的 cronexp 即可。
-#!author=onshine
+#!name=飞飞币每日签到
+#!desc=讯飞 AI 学习机「飞飞币」自动签到 R1.0.1。<b>签到时间在插件设置页直接改</b>（默认每天 08:00）；通知里带今日状态、飞飞币余额、连续签到天数、近 7 天打卡图和最近收入明细，可选顺带领取「可领取」态任务。首次需打开家长端 App 的「飞飞币」页面一次，自动抓取登录凭证；也可在设置里手填 Token。<b>更新后请删除旧插件重新添加</b>，否则 Loon 会继续跑缓存的旧脚本。
+#!author=Minis
+#!homepage=https://github.com/onshine/ScriptHubs/tree/main/feifei
 #!icon=https://xxj.xunfei.cn/h5-reward-shopping/img/feifeibi.79e392a3.png
+#!tag=签到
+#!loon_version=3.5.1(983)
 
 [Argument]
-# Token 可留空：留空时用抓包自动保存的（打开一次家长端「飞飞币」页面即可）
-# 多个账号用英文分号分隔，格式「名字|Bearer v01_xxx」或直接「Bearer v01_xxx」
-token =
-# 通知（留空则只用 Loon 系统通知）
-bark_url =
-tg_bot =
-tg_chat =
-# 通知里附带几条收入明细，0 = 不带
-details = 5
-# true = 顺带领取「可领取」状态的任务奖励
-claim_tasks = false
+cron = input,"0 8 * * *",tag=签到时间,desc=默认每天 08:00。格式「分 时 日 月 周」，分在前时在后：30 7 * * 1-5 = 工作日 07:30；0 8,20 * * * = 每天 8 点和 20 点各一次。⚠️逗号表示多个值，不是分隔时和分
+token = input,"",tag=Token,desc=一般留空，由抓包自动获取（打开家长端「飞飞币」页面一次即可）。手填格式 Bearer v01_xxx；多个账号用英文分号分隔，写成「名字|Bearer v01_xxx;名字2|Bearer v01_yyy」
+bark_url = input,"",tag=Bark推送,desc=例 https://api.day.app/你的Key，留空则只发 Loon 系统通知。自建 Bark 服务会自动补 /push
+tg_bot = input,"",tag=TG Bot Token,desc=例 123456789:ABCdefGhIJK，与下面的 chat_id 同时填才生效
+tg_chat = input,"",tag=TG Chat ID,desc=例 123456789 或 @channelname
+details = input,"5",tag=明细条数,desc=通知里附带几条最近收入记录，0 = 不带明细
+claim_tasks = switch,false,tag=顺带领取任务奖励,desc=开启后只领取已处于「可领取」状态的任务，不会伪造任务完成
 
 [Script]
-飞飞币签到 = type=cron,cronexp="0 8 * * *",wakeup=true,timeout=60,script-path=feifei.js
-飞飞币抓Token = type=http-request,pattern=^https://api\.xunfeixxj\.com/aiapp/,script-path=feifei-capture.js
+request if ${url} ~= /^https?:\/\/api\.xunfeixxj\.com\//i then script("https://raw.githubusercontent.com/onshine/ScriptHubs/main/feifei/feifei-capture.js") with tag="飞飞币抓Token", timeout=30
+cron ${cron} then script("https://raw.githubusercontent.com/onshine/ScriptHubs/main/feifei/feifei.js", {${token}, ${bark_url}, ${tg_bot}, ${tg_chat}, ${details}, ${claim_tasks}}) with tag="飞飞币签到", timeout=120
 
 [MitM]
-hostname = api.xunfeixxj.com
+hostname = %APPEND% api.xunfeixxj.com
