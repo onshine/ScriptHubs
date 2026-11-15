@@ -1,8 +1,11 @@
 /*
- * feifei-capture.js — R1.0.4 —— 自动抓取「飞飞币」接口的登录凭证（Authorization）
+ * feifei-capture.js — R1.0.7 —— 自动抓取「飞飞币」接口的登录凭证（Authorization）
  *
  * 由 Feifei.plugin 的 request 规则触发，把 Authorization 写进 $persistentStore 的
  * feifei_token，feifei.js 直接复用。抓包只在本机、只存 Loon 本地存储。
+ *
+ * R1.0.7 修正：只有「接口域名」的未命中才计入每日一次的自检提示；
+ *   页面/图片请求只写日志（它们本来就不带 Authorization），不再占用提示额度。
  *
  * R1.0.4 自检升级（★ 用来证明 MITM 到底通不通，不需要打开 App）：
  *   · 新增「页面命中」分支：用 Safari 打开 https://xxj.xunfei.cn/h5-reward-shopping/
@@ -69,17 +72,13 @@
 
   /* ---- 没找到 Authorization ---- */
   if (!auth) {
-    var isApi = /xunfeixxj\.com/.test(base);
-    console.log("[feifei-capture] 未找到 Authorization，header keys=" + Object.keys(h).join(","));
-    if ($persistentStore.read(KEY_MISS) !== today()) {
+    var isApi = /^https?:\/\/(?:[a-z0-9-]+\.)*xunfeixxj\.com\//i.test(url);
+    console.log("[feifei-capture] 未找到 Authorization（" + (isApi ? "接口域名" : "页面/静态资源，正常") +
+      "），header keys=" + Object.keys(h).join(","));
+    if (isApi && $persistentStore.read(KEY_MISS) !== today()) {
       $persistentStore.write(today(), KEY_MISS);
-      if (isApi) {
-        notify("飞飞币 · 自检", "命中接口但没有 Authorization",
-          "解密正常，但这条请求里没有凭证。\n在家长端「飞飞币」页面下拉刷新一次；仍如此就在插件里手填 Token。");
-      } else {
-        notify("飞飞币 · 自检", "MITM 已生效 ✅",
-          "已成功解密并命中页面请求：" + base + "\n说明证书与解密都没问题。\n→ 剩下的问题在 App 那条链路：确认你是在「装了 Loon 的这台设备」上打开的飞飞币页面。");
-      }
+      notify("飞飞币 · 自检", "接口请求里没有 Authorization",
+        "解密正常，但这条接口请求没带凭证。\n在家长端「飞飞币」页面下拉刷新一次；仍如此就在插件里手填 Token。");
     }
     return finish();
   }

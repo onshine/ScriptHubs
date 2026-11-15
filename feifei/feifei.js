@@ -1,8 +1,9 @@
 /*
  * feifei.js —— 讯飞 AI 学习机「飞飞币」每日自动签到（Loon / Surge / Stash 通用脚本）
  *
- * 版本：R1.0.6
- * 更新：2026-11-15 R1.0.6 收尾加固：无论成功/异常/卡住都一定会 $done() 并打「完成」日志，
+ * 版本：R1.0.7
+ * 更新：2026-11-15 R1.0.7 抓包自检只对接口域名提示（页面/图片不再占用每日提示额度）。
+ *       R1.0.6 收尾加固：无论成功/异常/卡住都一定会 $done() 并打「完成」日志，
  *       不再出现 Loon 里一直显示「运行中」。
  *       R1.0.5 Token 解析加固：从整段 JSON/配置文件里也能准确抠出 v01_ 凭证，
  *       自动去重、跳过无效项（之前把粘进来的整份 config.json 当成了 26 个账号）。
@@ -24,7 +25,7 @@
  * 通知：Loon 系统通知 + 可选 Bark / Telegram
  */
 
-var SCRIPT_VERSION = "1.0.6";
+var SCRIPT_VERSION = "1.0.7";
 var API = "https://api.xunfeixxj.com";
 var UA = "Mozilla/5.0 (iPhone; CPU iPhone OS 16_6_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148";
 var KEY_TOKEN = "feifei_token";
