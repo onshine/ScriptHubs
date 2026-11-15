@@ -144,7 +144,35 @@ python3 feifei.py cron --remove
 Loon 只能看到**它自己所在那台手机**的流量。飞飞币页面如果是在**学习机平板**上打开的，
 或者家长端装在另一部手机上，那 Loon 永远抓不到——必须用装了 Loon 的这台设备的家长端 App 打开飞飞币。
 
-**0.9 最后一招：全量自检（用完记得删）**
+**0.8 先确认插件定义是最新的（Loon 会缓存远程插件文件）**
+
+Loon → 配置 → 插件 → 点开「飞飞币每日签到」，看两处：
+
+- 描述里的版本号是不是 **R1.0.6**（还是 R1.0.0/R1.0.4）
+- 脚本列表应该能看到 **3 条**：飞飞币签到、飞飞币抓Token、飞飞币MITM自检
+
+只有 1 条、或者版本号还是旧的 → Loon 用的是缓存的旧定义，**删掉插件重新添加**，
+或者用带参数的新地址强制刷新：
+`https://raw.githubusercontent.com/onshine/ScriptHubs/main/feifei/Feifei.plugin?v=106`
+
+**0.9 决定性诊断：`feifei-diag.plugin`（用完删）**
+
+同目录下的 `feifei-diag.plugin` 只做一件事——验证 Loon 有没有在解密：
+
+```
+https://raw.githubusercontent.com/onshine/ScriptHubs/main/feifei/feifei-diag.plugin
+```
+
+装好后用 Safari 打开 `https://www.baidu.com`：
+
+| 结果 | 结论 |
+|---|---|
+| 弹出「MITM 已生效 ✅」 | 解密正常 → 问题在飞飞币那条链路（主机名 / 设备） |
+| 仍然什么都不弹 | MITM 本身没生效 → 证书没信任 或 MitM 总开关没开 |
+
+诊断完请立刻删除这个插件，它会把 MITM 范围临时扩大。
+
+**0.95 最后一招：全量规则**
 
 在第 0 步仍然毫无反应时，把这条临时加进插件 `[Script]` 末尾：
 

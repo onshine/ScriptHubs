@@ -1,0 +1,12 @@
+#!name=飞飞币诊断（用完删）
+#!desc=临时诊断插件，只做一件事：验证你的 Loon 到底有没有在解密 HTTPS。<b>装好后用 Safari 打开 https://www.baidu.com</b>，收到「MITM 已生效 ✅」就说明解密正常、问题在飞飞币那条链路；什么都不弹就说明 MITM 本身没生效（证书未信任 / 总开关没开 / 主机名没加载）。本插件只把 baidu 和讯飞几个域名加进 MITM 列表，<b>诊断完请立即删除</b>。
+#!author=Minis
+#!homepage=https://github.com/onshine/ScriptHubs/tree/main/feifei
+#!tag=诊断
+#!loon_version=3.5.1(983)
+
+[Script]
+飞飞币全量自检 = request if ${url} ~= /^https?:\/\//i then script("https://raw.githubusercontent.com/onshine/ScriptHubs/main/feifei/feifei-capture.js") with tag="全量自检", timeout=10
+
+[MitM]
+hostname = %APPEND% www.baidu.com, api.xunfeixxj.com, xxj.xunfei.cn, *.xunfeixxj.com, *.xunfei.cn
