@@ -1,8 +1,13 @@
 /*
- * feifei-capture.js — R1.0.2 —— 自动抓取「飞飞币」接口的登录凭证（Authorization）
+ * feifei-capture.js — R1.0.3 —— 自动抓取「飞飞币」接口的登录凭证（Authorization）
  *
  * 由 Feifei.plugin 的 request 规则触发，把 Authorization 写进 $persistentStore 的
  * feifei_token，feifei.js 直接复用。抓包只在本机、只存 Loon 本地存储。
+ *
+ * R1.0.3 自检升级：
+ *   · 每命中一次就写心跳（feifei_last_hit / feifei_last_url），签到脚本读它来判断
+ *     「规则从没触发」还是「触发了但没凭证」——这是排查 MITM 是否生效的关键依据
+ *   · Authorization 找不到时，扫一遍所有请求头，任何含 v01_ 的值都当凭证兜底
  *
  * R1.0.2 自检：
  *   · 命中接口并取到凭证 → 首次/换新凭证时推一条「已获取登录凭证」（同样的凭证只提示一次）
@@ -37,11 +42,25 @@
 
   var url = $request.url || "";
   var h = $request.headers || {};
+  var base = url.split("?")[0];
+
+  /* 心跳：只要规则被触发就记一笔，签到脚本据此判断 MITM 有没有生效 */
+  try {
+    $persistentStore.write(String(Date.now()), "feifei_last_hit");
+    $persistentStore.write(base, "feifei_last_url");
+  } catch (e) { }
+
   var auth = "";
   for (var k in h) {
     if (k.toLowerCase() === "authorization") { auth = String(h[k] || ""); break; }
   }
-  console.log("[feifei-capture] hit " + url.split("?")[0]);
+  if (!auth) {                       // 兜底：任何头里带 v01_ 的都算
+    for (var k2 in h) {
+      var v = String(h[k2] || "");
+      if (/v01_[A-Za-z0-9_\-\.]{10,}/.test(v)) { auth = v; console.log("[feifei-capture] 从头部 " + k2 + " 兜底取到凭证"); break; }
+    }
+  }
+  console.log("[feifei-capture] hit " + base);
 
   /* ---- 没找到 Authorization：说明 MITM 通了但位置不对，每天提示一次 ---- */
   if (!auth) {

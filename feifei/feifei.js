@@ -1,8 +1,10 @@
 /*
  * feifei.js —— 讯飞 AI 学习机「飞飞币」每日自动签到（Loon / Surge / Stash 通用脚本）
  *
- * 版本：R1.0.2
- * 更新：2026-11-15 R1.0.2 抓凭证脚本加自检提示（命中/未命中都会说清楚），匹配放宽到 *.xunfeixxj.com。
+ * 版本：R1.0.3
+ * 更新：2026-11-15 R1.0.3 全链路日志（每步打印到 Loon 日志）+ 缺 Token 时自动读取抓包心跳，
+ *       直接告诉你是「规则没触发」还是「触发但没取到凭证」。
+ *       R1.0.2 抓凭证脚本加自检提示（命中/未命中都会说清楚），匹配放宽到 *.xunfeixxj.com。
  *       R1.0.1 插件改用 Loon 官方 v2 Script 语法（cron ${cron} 参数化，
  *       签到时间可在插件设置页直接改）；参数改为位置数组解析，兼容对象写法。
  *       R1.0.0 首个版本：每日签到、任务奖励领取、签到明细（近 7 天打卡图 + 最近收入流水）、
@@ -17,13 +19,20 @@
  * 通知：Loon 系统通知 + 可选 Bark / Telegram
  */
 
-var SCRIPT_VERSION = "1.0.2";
+var SCRIPT_VERSION = "1.0.3";
 var API = "https://api.xunfeixxj.com";
 var UA = "Mozilla/5.0 (iPhone; CPU iPhone OS 16_6_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148";
 var KEY_TOKEN = "feifei_token";
 
 if (typeof $done === "undefined") { var $done = function () { }; } /* 便于本地/Node 测试 */
 console.log("[feifei] v" + SCRIPT_VERSION);
+function log(m) { try { console.log("[feifei] " + m); } catch (e) { } }
+function storeRead(k) {
+  try { return (typeof $persistentStore !== "undefined" && $persistentStore.read) ? $persistentStore.read(k) : null; }
+  catch (e) { return null; }
+}
+function tail(t) { return t ? "…" + String(t).slice(-4) : "(空)"; }
+
 /* Loon v2 语法 script(url, {${a},${b}}) 传进来的是「位置数组」；
    旧式对象写法也兼容。 */
 function readArg() {
@@ -53,16 +62,19 @@ function headers(tok) {
 }
 
 function post(tok, path, body) {
+  var t0 = Date.now();
   return new Promise(function (resolve, reject) {
     $httpClient.post(
       { url: API + path, headers: headers(tok), body: JSON.stringify(body || {}) },
       function (error, response, data) {
-        if (error) return reject(new Error("网络错误: " + error));
+        var ms = Date.now() - t0;
+        if (error) { log("✗ " + path + " 网络错误(" + ms + "ms): " + error); return reject(new Error("网络错误: " + error)); }
         var st = response && response.status;
-        if (st === 401 || st === 482 || st === 483) return reject(new Error("TOKEN_EXPIRED"));
+        if (st === 401 || st === 482 || st === 483) { log("✗ " + path + " 登录态失效 HTTP " + st); return reject(new Error("TOKEN_EXPIRED")); }
         var js;
         try { js = JSON.parse(data); } catch (e) { return reject(new Error("响应非 JSON: " + String(data).slice(0, 80))); }
-        if (js.status && js.status !== 0) return reject(new Error(js.msg || ("status=" + js.status)));
+        if (js.status && js.status !== 0) { log("✗ " + path + " status=" + js.status + " " + (js.msg || "")); return reject(new Error(js.msg || ("status=" + js.status))); }
+        log("✓ " + path + " " + ms + "ms");
         resolve(js.data || {});
       }
     );
@@ -194,15 +206,25 @@ function notifyTG(title, content) {
 
 (function main() {
   var accounts = loadAccounts();
+  log("账号数 " + accounts.length + "，明细条数 " + (arg.details || 5));
   if (!accounts.length) {
-    $notification.post("飞飞币签到", "缺少 Token",
-      "请先在 Loon 插件里填 token，或用学习机家长端打开一次「飞飞币」页面自动抓取。");
+    var hitAt = Number(storeRead("feifei_last_hit") || 0);
+    var hitUrl = String(storeRead("feifei_last_url") || "");
+    var hitTxt = hitAt ? (new Date(hitAt).toLocaleString() + "  " + hitUrl) : "从未命中";
+    log("抓包心跳: " + hitTxt);
+    var advice = hitAt
+      ? "规则已触发过，但没取到 Authorization。→ 到家长端「飞飞币」页面下拉刷新一次；仍不行就在插件里手填 Token。"
+      : "规则从未触发，说明请求没被 MITM 解密。→ ①插件已启用 ②Loon 设置→MitM 开关开 + 证书已装 + iOS「证书信任设置」已信任 ③改完插件后把 VPN 开关关掉再打开。";
+    log(advice);
+    $notification.post("飞飞币 · 缺 Token", "抓包心跳：" + (hitAt ? "有命中" : "从未命中"),
+      "最近命中接口：" + hitTxt + "\n\n" + advice);
     $done();
     return;
   }
   var detailsN = Number(arg.details || 5);
   var claimTasks = arg.claim_tasks === true || String(arg.claim_tasks || "false").toLowerCase() === "true";
 
+  accounts.forEach(function (a) { log("[ " + a.name + " ] token " + a.token.length + " 字符 " + tail(a.token)); });
   var jobs = accounts.map(function (acc) {
     return runOne(acc, detailsN, claimTasks)
       .then(function (lines) { return "[ " + acc.name + " ]\n" + lines.join("\n"); })
