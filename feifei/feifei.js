@@ -1,8 +1,10 @@
 /*
  * feifei.js —— 讯飞 AI 学习机「飞飞币」每日自动签到（Loon / Surge / Stash 通用脚本）
  *
- * 版本：R1.0.7
- * 更新：2026-11-15 R1.0.7 抓包自检只对接口域名提示（页面/图片不再占用每日提示额度）。
+ * 版本：R1.0.8
+ * 更新：2026-11-15 R1.0.8 通知排版重做：余额/连签/今日可赚 一行一目了然，7 天签到压缩成
+ *       「10● 11● 12○」并标注月份，明细标题去掉「完成…任务奖励」前后缀，账号名进标题。
+ *       R1.0.7 抓包自检只对接口域名提示（页面/图片不再占用每日提示额度）。
  *       R1.0.6 收尾加固：无论成功/异常/卡住都一定会 $done() 并打「完成」日志，
  *       不再出现 Loon 里一直显示「运行中」。
  *       R1.0.5 Token 解析加固：从整段 JSON/配置文件里也能准确抠出 v01_ 凭证，
@@ -25,7 +27,7 @@
  * 通知：Loon 系统通知 + 可选 Bark / Telegram
  */
 
-var SCRIPT_VERSION = "1.0.7";
+var SCRIPT_VERSION = "1.0.8";
 var API = "https://api.xunfeixxj.com";
 var UA = "Mozilla/5.0 (iPhone; CPU iPhone OS 16_6_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148";
 var KEY_TOKEN = "feifei_token";
@@ -106,16 +108,6 @@ function httpPost(url, bodyStr, ctype) {
   });
 }
 
-function board(signList) {
-  var out = [];
-  (signList || []).forEach(function (it) {
-    var d = String(it.dateText || "");
-    if (d.length !== 8) return;
-    out.push(d.slice(4, 6) + "-" + d.slice(6, 8) + (it.signState ? "●" : "○"));
-  });
-  return out.join("  ");
-}
-
 function ts2str(ms) {
   var d = new Date(Number(ms));
   var p = function (n) { return (n < 10 ? "0" : "") + n; };
@@ -187,19 +179,40 @@ function loadAccounts() {
   return out;
 }
 
+function shortTitle(t) {
+  t = String(t || "-");
+  t = t.replace(/^完成/, "").replace(/任务奖励$/, "").replace(/奖励$/, "");
+  return t.length > 16 ? t.slice(0, 16) + "…" : t;
+}
+
+/* 近 7 天签到：同月只显示日，跨月显示月日 */
+function board(sum) {
+  var list = (sum.signList || []).filter(function (x) { return String(x.dateText || "").length === 8; });
+  if (!list.length) return "";
+  var mon = list[0].dateText.slice(4, 6), same = true;
+  list.forEach(function (x) { if (x.dateText.slice(4, 6) !== mon) same = false; });
+  return list.map(function (x) {
+    var d = x.dateText;
+    var label = same ? d.slice(6, 8) : (d.slice(4, 6) + "/" + d.slice(6, 8));
+    return label + (x.signState ? "●" : "○");
+  }).join(" ") + (same ? "  (" + Number(mon) + "月)" : "");
+}
+
 function runOne(acc, detailsN, claimTasks) {
-  var lines = [];
+  var delta = 0, status = "", extra = [];
   return post(acc.token, "/aiapp/points/homePage/getPointsAndRemind", {})
     .then(function (sum) {
       var p = [];
       if (signedToday(sum)) {
-        lines.push("☑️ 今日已签到");
+        status = "☑️ 今日已签到";
       } else {
         p.push(post(acc.token, "/aiapp/points/sign/insert", {}).then(function (d) {
           var pts = Number(d.points || 0);
-          lines.push(pts > 0 ? "✅ 签到成功 +" + pts + " 飞飞币" : "ℹ️ 签到已调用，返币 0（可能已签到）");
+          delta += pts;
+          status = pts > 0 ? ("✅ 签到成功  +" + pts) : "ℹ️ 签到已调用（返币 0）";
         }).catch(function (e) {
-          lines.push("❌ 签到失败：" + e.message);
+          status = "❌ 签到失败";
+          extra.push("签到：" + e.message);
         }));
       }
       if (claimTasks) {
@@ -208,8 +221,11 @@ function runOne(acc, detailsN, claimTasks) {
           if (!tasks.length) return;
           return Promise.all(tasks.map(function (t) {
             return post(acc.token, "/aiapp/taskCenter/pointsTask/receivePoints", { taskCode: t.taskCode })
-              .then(function () { lines.push("🎁 领取：" + t.taskTitle + " +" + t.taskPoints); })
-              .catch(function (e) { lines.push("❌ 领取「" + t.taskTitle + "」失败：" + e.message); });
+              .then(function () {
+                delta += Number(t.taskPoints || 0);
+                extra.push("🎁 " + shortTitle(t.taskTitle) + "  +" + t.taskPoints);
+              })
+              .catch(function (e) { extra.push("✗ 领取「" + shortTitle(t.taskTitle) + "」失败：" + e.message); });
           }));
         }).catch(function () { }));
       }
@@ -219,24 +235,37 @@ function runOne(acc, detailsN, claimTasks) {
       return post(acc.token, "/aiapp/points/homePage/getPointsAndRemind", {});
     })
     .then(function (sum) {
-      var out = lines.slice();
-      out.push("💰 飞飞币：" + (sum.totalPoints || 0) + "（今日任务可得 " + (sum.todayTaskPoints || 0) + "）");
-      out.push("📅 连续签到：" + (sum.totalSignDays || 0) + " 天");
-      var b = board(sum.signList);
-      if (b) out.push("🗓 " + b);
-      if (!detailsN) return out;
+      var res = { name: acc.name, status: status || "ℹ️ 已查询", delta: delta, sum: sum, extra: extra };
+      if (!detailsN) return res;
       return post(acc.token, "/aiapp/points/homePage/getPointsDetailList",
         { changeType: 1, pageSize: Math.max(detailsN, 10), cursor: 0 }).then(function (d) {
-          var list = (d.detailList || []).slice(0, detailsN);
-          if (list.length) {
-            out.push("📋 最近明细：");
-            list.forEach(function (it) {
-              out.push("   " + ts2str(it.changeTime) + "  +" + it.changePoints + "  " + (it.changeTitle || "-"));
-            });
-          }
-          return out;
-        }).catch(function () { return out; });
+          res.details = (d.detailList || []).slice(0, detailsN);
+          return res;
+        }).catch(function () { return res; });
     });
+}
+
+/* 单个账号的正文 */
+function formatAccount(res) {
+  var sum = res.sum || {};
+  var out = [];
+  var deltaTxt = res.delta ? ("（本次 +" + res.delta + "）") : "";
+  out.push("💰 余额  " + (sum.totalPoints || 0) + " 飞飞币" + deltaTxt);
+  out.push("🔥 连签  " + (sum.totalSignDays || 0) + " 天     🎯 今日可赚 " + (sum.todayTaskPoints || 0));
+  var b = board(sum);
+  if (b) { out.push(""); out.push("📅 近 7 天签到"); out.push(b); }
+  if (res.extra && res.extra.length) { out.push(""); out.push(res.extra.join("\n")); }
+  if (res.details && res.details.length) {
+    out.push(""); out.push("📋 最近变动");
+    res.details.forEach(function (it) {
+      var full = ts2str(it.changeTime);                       // "11-16 09:39"
+      var now = new Date();
+      var isToday = full.indexOf((now.getMonth() < 9 ? "0" : "") + (now.getMonth() + 1) + "-" +
+        (now.getDate() < 10 ? "0" : "") + now.getDate()) === 0;
+      out.push("  " + (isToday ? full.slice(6) : full) + "  +" + it.changePoints + "  " + shortTitle(it.changeTitle));
+    });
+  }
+  return out.join("\n");
 }
 
 function notifyBark(title, content) {
@@ -285,28 +314,40 @@ function notifyTG(title, content) {
   var detailsN = Number(arg.details || 5);
   var claimTasks = arg.claim_tasks === true || String(arg.claim_tasks || "false").toLowerCase() === "true";
 
-  accounts.forEach(function (a) { log("[ " + a.name + " ] token " + a.token.length + " 字符 " + tail(a.token)); });
+  accounts.forEach(function (a) {
+    log("[ " + a.name + " ] token " + a.token.length + " 字符 " + tail(a.token) + (arg.token ? "" : "（抓包自动获取）"));
+  });
   var jobs = accounts.map(function (acc) {
     return runOne(acc, detailsN, claimTasks)
-      .then(function (lines) { return "[ " + acc.name + " ]\n" + lines.join("\n"); })
+      .then(function (res) { return res; })
       .catch(function (e) {
         var m = e.message === "TOKEN_EXPIRED"
-          ? "登录态失效，请用家长端 App 打开一次飞飞币页面以重新抓取 Token"
+          ? "登录态失效，请用家长端 App 打开一次「飞飞币」页面以重新抓取"
           : e.message;
-        return "[ " + acc.name + " ]\n❌ " + m;
+        return { name: acc.name, status: "❌ " + m, failed: true, sum: {} };
       });
   });
 
-  /* 看门狗：任何一步卡住（网络无回调等）也保证 30 秒内收尾 */
   try { setTimeout(function () { finish("看门狗超时"); }, 30000); } catch (e) { }
 
-  Promise.all(jobs).then(function (all) {
-    var content = all.join("\n\n");
-    var failed = /❌/.test(content);
-    var title = "飞飞币签到" + (failed ? "（异常）" : "");
-    log("结果: " + content.replace(/\n+/g, " / ").slice(0, 160));
-    safeNotify(title, "", content);
-    return Promise.all([notifyBark(title, content), notifyTG(title, content)]);
+  Promise.all(jobs).then(function (results) {
+    var failed = results.some(function (r) { return r.failed || /❌/.test(r.status || ""); });
+    var title, sub = "", body, pushBody;
+    if (results.length === 1) {
+      var r0 = results[0];
+      title = r0.name && r0.name !== "飞飞币" ? ("飞飞币 · " + r0.name) : "飞飞币";
+      sub = r0.status;
+      body = r0.failed ? "" : formatAccount(r0);
+    } else {
+      title = "飞飞币 · " + results.length + " 个账号";
+      body = results.map(function (r) {
+        return "▎" + r.name + "  " + r.status + "\n" + (r.failed ? "" : formatAccount(r));
+      }).join("\n\n");
+    }
+    pushBody = sub ? (sub + (body ? "\n\n" + body : "")) : body;
+    log("结果: " + pushBody.replace(/\n+/g, " / ").slice(0, 160));
+    safeNotify(title, sub, body);
+    return Promise.all([notifyBark(title, pushBody), notifyTG(title, pushBody)]);
   }).then(function () {
     finish();
   }, function (e) {

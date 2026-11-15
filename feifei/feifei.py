@@ -3,7 +3,7 @@
 """
 feifei.py —— 讯飞 AI 学习机「飞飞币」每日自动签到 / 明细查询 / 通知推送
 
-版本：R1.0.7（2026-11-15 R1.0.7：与 Loon 抓包自检修正版对齐；R1.0.0 首个版本）
+版本：R1.0.8（2026-11-15 R1.0.8：通知排版与 Loon 版对齐；R1.0.0 首个版本）
 仓库：https://github.com/onshine/ScriptHubs
 
 特点
@@ -41,7 +41,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-SCRIPT_VERSION = "1.0.7"
+SCRIPT_VERSION = "1.0.8"
 API_HOST = "https://api.xunfeixxj.com"
 APPID = "H5APP"
 UA = ("Mozilla/5.0 (iPhone; CPU iPhone OS 16_6_1 like Mac OS X) "
@@ -247,31 +247,50 @@ def fmt_ts(ms):
         return "-"
 
 
+def short_title(t):
+    """把「完成了解讯飞AI学家长端任务奖励」缩成「了解讯飞AI学家长端」"""
+    t = str(t or "-")
+    for p in ("完成",):
+        if t.startswith(p):
+            t = t[len(p):]
+    for s in ("任务奖励", "奖励"):
+        if t.endswith(s):
+            t = t[:-len(s)]
+    return t if len(t) <= 16 else t[:16] + "…"
+
+
 def sign_board(sign_list):
-    """把最近 7 天转成 11-09○ 11-10● 形式"""
-    parts = []
-    for it in sign_list or []:
-        d = str(it.get("dateText") or "")
-        if len(d) != 8:
-            continue
-        mark = "●" if it.get("signState") else "○"
-        parts.append("%s-%s%s" % (d[4:6], d[6:8], mark))
-    return "  ".join(parts)
+    """近 7 天签到：同月只显示日（10●），跨月显示 11/10●"""
+    items = [it for it in (sign_list or []) if len(str(it.get("dateText") or "")) == 8]
+    if not items:
+        return ""
+    mon = items[0]["dateText"][4:6]
+    same = all(it["dateText"][4:6] == mon for it in items)
+    out = []
+    for it in items:
+        d = it["dateText"]
+        label = d[6:8] if same else "%s/%s" % (d[4:6], d[6:8])
+        out.append(label + ("●" if it.get("signState") else "○"))
+    txt = "  ".join(out)
+    if same and mon.isdigit():
+        txt += "  (%d月)" % int(mon)
+    return txt
 
 
 def run_account(acc, cfg, args):
+    """返回 (name, ok, status, body)"""
     name = acc.get("name") or "默认账号"
     token = (acc.get("token") or "").strip()
     if not token:
-        return name, False, "【%s】未配置 Token" % name, "飞飞币签到"
+        return name, False, "❌ 未配置 Token", ""
 
     print("\n▶ %s" % name)
-    lines = []
-    ok = True
-    gained = 0
+    status = ""
+    delta = 0
+    extra = []
 
     before = get_summary(token)
-    total_before = before.get("totalPoints", 0)
+    total_before = int(before.get("totalPoints") or 0)
     signed_today = False
     for it in before.get("signList") or []:
         if it.get("isToday") == 1 and it.get("signState") == 1:
@@ -280,34 +299,34 @@ def run_account(acc, cfg, args):
     # ---- 签到 ----
     if args.command in ("sign", "run"):
         if signed_today:
+            status = "☑️ 今日已签到"
             print("  今日已签到")
-            lines.append("☑️ 今日已签到")
         else:
             data = do_sign(token)
-            gained = int(data.get("points") or 0)
-            if gained > 0:
-                print("  签到成功 +%d" % gained)
-                lines.append("✅ 签到成功 +%d 飞飞币" % gained)
+            delta = int(data.get("points") or 0)
+            if delta > 0:
+                status = "✅ 签到成功  +%d" % delta
+                print("  签到成功 +%d" % delta)
             else:
+                status = "ℹ️ 签到已调用（返币 0）"
                 print("  签到接口已调用（返回 0 币，可能今日已签或活动未开始）")
-                lines.append("ℹ️ 签到接口已调用，返币 0（可能已签到）")
         # ---- 顺手领取可领取任务 ----
-        if args.claim_tasks:
+        if getattr(args, "claim_tasks", False):
             try:
-                claimed = []
                 for t in get_tasks(token):
-                    if t.get("state") == 1:  # 1=可领取
-                        try:
-                            receive_task(token, t.get("taskCode"))
-                            claimed.append("%s +%s" % (t.get("taskTitle"), t.get("taskPoints")))
-                            gained += int(t.get("taskPoints") or 0)
-                        except ApiError as e:
-                            print("  领取「%s」失败：%s" % (t.get("taskTitle"), e))
-                if claimed:
-                    print("  领取任务：%s" % "、".join(claimed))
-                    lines.append("🎁 领取任务：" + "、".join(claimed))
+                    if t.get("state") != 1:      # 1=可领取
+                        continue
+                    try:
+                        receive_task(token, t.get("taskCode"))
+                        delta += int(t.get("taskPoints") or 0)
+                        extra.append("🎁 %s  +%s" % (short_title(t.get("taskTitle")),
+                                                     t.get("taskPoints")))
+                    except ApiError as e:
+                        extra.append("✗ 领取「%s」失败：%s" % (short_title(t.get("taskTitle")), e))
             except ApiError as e:
                 print("  任务列表获取失败：%s" % e)
+    else:
+        status = "ℹ️ 已查询"
 
     # ---- 汇总 ----
     after = get_summary(token)
@@ -315,13 +334,16 @@ def run_account(acc, cfg, args):
     total_sign = after.get("totalSignDays", 0)
     today_task = after.get("todayTaskPoints", 0)
     print("  飞飞币 %s（今日任务可得 %s，连续签到 %s 天）" % (total, today_task, total_sign))
-    if not lines:
-        lines.append("ℹ️ 当前飞飞币 %s" % total)
-    lines.append("💰 飞飞币：%s（今日任务可得 %s）" % (total, today_task))
-    lines.append("📅 连续签到：%s 天" % total_sign)
+
+    parts = []
+    dt = "（本次 +%d）" % delta if delta else ""
+    parts.append("💰 余额  %s 飞飞币%s" % (total, dt))
+    parts.append("🔥 连签  %s 天     🎯 今日可赚 %s" % (total_sign, today_task))
     board = sign_board(after.get("signList") or before.get("signList"))
     if board:
-        lines.append("🗓 " + board)
+        parts += ["", "📅 近 7 天签到", board]
+    if extra:
+        parts += ["", "\n".join(extra)]
 
     # ---- 明细 ----
     n_detail = args.details if args.details is not None else (10 if args.command == "run" else 0)
@@ -329,17 +351,17 @@ def run_account(acc, cfg, args):
         try:
             details = get_details(token, n_detail)
             if details:
-                lines.append("📋 最近明细：")
+                today = time.strftime("%m-%d")
+                parts += ["", "📋 最近变动"]
                 for d in details:
-                    lines.append("   %s  +%s  %s" % (
-                        fmt_ts(d.get("changeTime")), d.get("changePoints"),
-                        d.get("changeTitle") or "-"))
+                    ts = fmt_ts(d.get("changeTime"))
+                    parts.append("  %s  +%s  %s" % (
+                        ts[6:] if ts.startswith(today) else ts,
+                        d.get("changePoints"), short_title(d.get("changeTitle"))))
         except ApiError as e:
             print("  明细获取失败：%s" % e)
 
-    body = "\n".join(lines)
-    title = "飞飞币签到" if args.command in ("sign", "run") else "飞飞币查询"
-    return name, ok, "[%s]\n%s" % (name, body), title
+    return name, True, status, "\n".join(parts)
 
 
 # --------------------------------------------------------------------------- #
@@ -492,25 +514,30 @@ def main():
         args.details = args.details or 20
         args.command = "info"
 
-    msgs, titles, failed = [], set(), 0
+    results, failed = [], 0
     for acc in accounts:
+        ok = True
         try:
-            r = run_account(acc, cfg, args)
-            name, ok, msg, _t = r
-            msgs.append(msg)
+            name, ok, status, body = run_account(acc, cfg, args)
         except ApiError as e:
-            failed += 1
+            ok = False
             print("  ❌ %s" % e)
-            msgs.append("[%s]\n❌ %s" % (acc.get("name") or "默认账号", e))
+            name, status, body = (acc.get("name") or "默认账号"), "❌ %s" % e, ""
         except Exception as e:  # noqa: BLE001
-            failed += 1
+            ok = False
             print("  ❌ 未预期错误：%r" % e)
-            msgs.append("[%s]\n❌ 未预期错误：%r" % (acc.get("name") or "默认账号", e))
+            name, status, body = (acc.get("name") or "默认账号"), "❌ 未预期错误：%r" % e, ""
+        if not ok:
+            failed += 1
+        results.append((name, status, body))
 
-    content = "\n\n".join(msgs)
-    title = "飞飞币签到" if args.command in ("sign", "run") else "飞飞币查询"
-    if failed:
-        title += "（%d 个账号异常）" % failed
+    if len(results) == 1:
+        name, status, body = results[0]
+        title = "飞飞币 · %s" % name if name not in ("飞飞币", "默认账号") else "飞飞币"
+        content = status + (("\n\n" + body) if body else "")
+    else:
+        title = "飞飞币 · %d 个账号" % len(results)
+        content = "\n\n".join("▎%s  %s\n%s" % (n, st, bd) for n, st, bd in results)
 
     # 终端输出
     print("\n" + "=" * 46)
