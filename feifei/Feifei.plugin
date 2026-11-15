@@ -1,0 +1,24 @@
+#!name=飞飞币每日签到（讯飞 AI 学习机）
+#!desc=讯飞 AI 学习机「飞飞币」自动签到 R1.0.0：每天定时签到、可选领取任务奖励，通知里带今日状态/连续签到/近 7 天打卡图和最近收入明细；打开家长端飞飞币页面即自动抓取 Token。签到时间改 [Script] 里的 cronexp 即可。
+#!author=onshine
+#!icon=https://xxj.xunfei.cn/h5-reward-shopping/img/feifeibi.79e392a3.png
+
+[Argument]
+# Token 可留空：留空时用抓包自动保存的（打开一次家长端「飞飞币」页面即可）
+# 多个账号用英文分号分隔，格式「名字|Bearer v01_xxx」或直接「Bearer v01_xxx」
+token =
+# 通知（留空则只用 Loon 系统通知）
+bark_url =
+tg_bot =
+tg_chat =
+# 通知里附带几条收入明细，0 = 不带
+details = 5
+# true = 顺带领取「可领取」状态的任务奖励
+claim_tasks = false
+
+[Script]
+飞飞币签到 = type=cron,cronexp="0 8 * * *",wakeup=true,timeout=60,script-path=feifei.js
+飞飞币抓Token = type=http-request,pattern=^https://api\.xunfeixxj\.com/aiapp/,script-path=feifei-capture.js
+
+[MitM]
+hostname = api.xunfeixxj.com

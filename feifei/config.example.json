@@ -1,0 +1,26 @@
+{
+  "accounts": [
+    {
+      "name": "学习机",
+      "token": "Bearer v01_xxxxxxxxxxxx（用 import 命令写入）",
+      "enabled": true
+    }
+  ],
+  "notify": {
+    "bark": {
+      "url": "https://api.day.app/你的BarkKey",
+      "group": "飞飞币",
+      "sound": "",
+      "icon": ""
+    },
+    "telegram": {
+      "bot_token": "",
+      "chat_id": ""
+    },
+    "webhook": {
+      "url": "",
+      "method": "POST"
+    },
+    "only_on_error": false
+  }
+}
