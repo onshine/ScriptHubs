@@ -1,8 +1,10 @@
 /*
  * feifei.js —— 讯飞 AI 学习机「飞飞币」每日自动签到（Loon / Surge / Stash 通用脚本）
  *
- * 版本：R1.0.8
- * 更新：2026-11-15 R1.0.8 通知排版重做：余额/连签/今日可赚 一行一目了然，7 天签到压缩成
+ * 版本：R1.0.9
+ * 更新：2026-11-15 R1.0.9 通知加固：启动打印通知环境（$notification/$notify 是否存在），
+ *       兼容 QX 的 $notify，并延迟 800ms 再 $done()（避免 Loon 提前销毁上下文把通知丢掉）。
+ *       R1.0.8 通知排版重做：余额/连签/今日可赚 一行一目了然，7 天签到压缩成
  *       「10● 11● 12○」并标注月份，明细标题去掉「完成…任务奖励」前后缀，账号名进标题。
  *       R1.0.7 抓包自检只对接口域名提示（页面/图片不再占用每日提示额度）。
  *       R1.0.6 收尾加固：无论成功/异常/卡住都一定会 $done() 并打「完成」日志，
@@ -27,7 +29,7 @@
  * 通知：Loon 系统通知 + 可选 Bark / Telegram
  */
 
-var SCRIPT_VERSION = "1.0.8";
+var SCRIPT_VERSION = "1.0.9";
 var API = "https://api.xunfeixxj.com";
 var UA = "Mozilla/5.0 (iPhone; CPU iPhone OS 16_6_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148";
 var KEY_TOKEN = "feifei_token";
@@ -46,11 +48,44 @@ function finish(reason) {
   if (__finished) return;
   __finished = true;
   log("完成" + (reason ? "（" + reason + "）" : ""));
-  try { $done(); } catch (e) { }
+  /* 延迟一点再 $done()：Loon 在 $done() 后会销毁脚本上下文，
+     通知是异步投递的，立刻销毁有概率被丢掉（表现就是"通知已发送但收不到"） */
+  try {
+    setTimeout(function () { try { $done(); } catch (e) { } }, 800);
+  } catch (e) {
+    try { $done(); } catch (e2) { }
+  }
+}
+
+function notifyEnv() {
+  var a = "无", b = "无";
+  try {
+    a = typeof $notification;
+    if (typeof $notification !== "undefined" && $notification) {
+      a += (typeof $notification.post === "function") ? ".post✅" : ".post❌";
+    }
+  } catch (e) { }
+  try { b = typeof $notify; } catch (e) { }
+  return "$notification=" + a + "  $notify=" + b;
 }
 function safeNotify(title, sub, body) {
-  try { $notification.post(title, sub || "", body || ""); log("通知已提交: " + title); }
-  catch (e) { log("✗ 通知失败: " + (e && e.message ? e.message : e)); }
+  try {
+    if (typeof $notification !== "undefined" && $notification &&
+        typeof $notification.post === "function") {
+      $notification.post(title, sub || "", body || "");
+      log("已发送通知 → $notification.post：" + title);
+      return true;
+    }
+    if (typeof $notify === "function") {            // Quantumult X
+      $notify(title, sub || "", body || "");
+      log("已发送通知 → $notify：" + title);
+      return true;
+    }
+    log("✗ 无可用通知接口（" + notifyEnv() + "），仅写日志");
+  } catch (e) {
+    log("✗ 通知失败：" + (e && e.message ? e.message : e) + "（" + notifyEnv() + "）");
+  }
+  return false;
 }
 
 /* Loon v2 语法 script(url, {${a},${b}}) 传进来的是「位置数组」；
@@ -287,6 +322,7 @@ function notifyTG(title, content) {
 }
 
 (function main() {
+  log("通知环境: " + notifyEnv());
   var accounts = loadAccounts();
   log("账号数 " + accounts.length + "，明细条数 " + (arg.details || 5));
   if (!accounts.length && String(arg.token || "").trim()) {
