@@ -1,0 +1,21 @@
+#!name=飞飞币每日签到（兼容版）
+#!desc=飞飞币签到 R1.1.1 的**备用插件**，用于某些 Loon 版本不解析 v2 脚本语法、导致脚本列表里看不到「飞飞币签到」的情况。本版用老式写法，签到时间固定 08:00（要改时间请编辑下面 cronexp）。功能与正式版一致：签到 + 通知 + 自动抓 Token，只是没有 12:30 补签那一趟。
+#!author=Minis
+#!homepage=https://github.com/onshine/ScriptHubs/tree/main/feifei
+#!tag=签到
+#!loon_version=3.5.1(983)
+
+[Argument]
+token = input,"",tag=Token,desc=一般留空，由抓包自动获取
+bark_url = input,"",tag=Bark推送,desc=例 https://api.day.app/你的Key
+tg_bot = input,"",tag=TG Bot Token,desc=例 123456789:ABCdefGhIJK
+tg_chat = input,"",tag=TG Chat ID,desc=例 123456789 或 @channelname
+details = input,"5",tag=明细条数,desc=0 = 不带明细
+claim_tasks = switch,false,tag=顺带领取任务奖励,desc=只领取已处于「可领取」状态的任务
+
+[Script]
+飞飞币签到 = type=cron,cronexp="0 8 * * *",wakeup=true,timeout=120,script-path=https://raw.githubusercontent.com/onshine/ScriptHubs/main/feifei/feifei.js
+飞飞币抓Token = type=http-request,pattern=^https?://([a-z0-9-]+\.)*xunfeixxj\.com/,script-path=https://raw.githubusercontent.com/onshine/ScriptHubs/main/feifei/feifei-capture.js
+
+[MitM]
+hostname = %APPEND% api.xunfeixxj.com, *.xunfeixxj.com

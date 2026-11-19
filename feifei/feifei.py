@@ -3,7 +3,7 @@
 """
 feifei.py —— 讯飞 AI 学习机「飞飞币」每日自动签到 / 明细查询 / 通知推送
 
-版本：R1.1.0（2026-11-19 R1.1.0：新增「补签」——漏跑时补上、已签则静默；R1.0.0 首个版本）
+版本：R1.1.1（2026-11-19 R1.1.1：与 Loon 插件参数纯占位符版对齐；R1.0.0 首个版本）
 仓库：https://github.com/onshine/ScriptHubs
 
 特点
@@ -41,7 +41,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-SCRIPT_VERSION = "1.1.0"
+SCRIPT_VERSION = "1.1.1"
 API_HOST = "https://api.xunfeixxj.com"
 APPID = "H5APP"
 UA = ("Mozilla/5.0 (iPhone; CPU iPhone OS 16_6_1 like Mac OS X) "

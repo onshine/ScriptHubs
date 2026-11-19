@@ -1,8 +1,10 @@
 /*
  * feifei.js —— 讯飞 AI 学习机「飞飞币」每日自动签到（Loon / Surge / Stash 通用脚本）
  *
- * 版本：R1.1.0
- * 更新：2026-11-19 R1.1.0 支持「补签」：iOS 后台挂起导致主任务漏跑时，第二趟
+ * 版本：R1.1.1
+ * 更新：2026-11-19 R1.1.1 插件参数改为纯占位符（去掉 false/true 字面量，否则 Loon 会整行丢弃
+ *       cron 条目）；补签趟改由「第 5 位不是数字」识别。
+ *       R1.1.0 支持「补签」：iOS 后台挂起导致主任务漏跑时，第二趟
  *       （默认 12:30）自动补上；补签趟在「今日已签到」时全程静默，不重复打扰。
  *       R1.0.9 通知加固：启动打印通知环境（$notification/$notify 是否存在），
  *       兼容 QX 的 $notify，并延迟 800ms 再 $done()（避免 Loon 提前销毁上下文把通知丢掉）。
@@ -31,7 +33,7 @@
  * 通知：Loon 系统通知 + 可选 Bark / Telegram
  */
 
-var SCRIPT_VERSION = "1.1.0";
+var SCRIPT_VERSION = "1.1.1";
 var API = "https://api.xunfeixxj.com";
 var UA = "Mozilla/5.0 (iPhone; CPU iPhone OS 16_6_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148";
 var KEY_TOKEN = "feifei_token";
@@ -99,8 +101,14 @@ function readArg() {
   if (!a || typeof a !== "object") return {};
   if (Array.isArray(a)) {
     if (a.length === 1 && a[0] && typeof a[0] === "object" && !Array.isArray(a[0])) return a[0];
-    return { token: a[0], bark_url: a[1], tg_bot: a[2], tg_chat: a[3], details: a[4],
-             claim_tasks: a[5], quiet: a[6] };
+    /* 补签趟的第 5 位传的是 cron 表达式（如 "30 12 * * *"）而不是数字，
+       用它区分「主任务 / 补签」——这样整行只用 ${...} 占位符，
+       不会因为出现 false/true 之类的裸字面量被 Loon 丢弃。 */
+    var dn = Number(a[4]);
+    var isBackup = !isFinite(dn);
+    return { token: a[0], bark_url: a[1], tg_bot: a[2], tg_chat: a[3],
+             details: isBackup ? 5 : dn, claim_tasks: a[5],
+             isBackup: isBackup, quiet: isBackup };
   }
   return a;
 }
@@ -351,8 +359,9 @@ function notifyTG(title, content) {
     return;
   }
   var detailsN = Number(arg.details || 5);
-  var quiet = arg.quiet === true || String(arg.quiet || "false").toLowerCase() === "true";
-  log("模式: " + (quiet ? "补签（已签到则静默）" : "主任务"));
+  var quiet = arg.quiet === true || arg.isBackup === true ||
+              String(arg.quiet || "false").toLowerCase() === "true";
+  log("模式: " + (quiet ? "补签（已签到则静默）" : "主任务") + "，明细 " + detailsN + " 条");
   var claimTasks = arg.claim_tasks === true || String(arg.claim_tasks || "false").toLowerCase() === "true";
 
   accounts.forEach(function (a) {
