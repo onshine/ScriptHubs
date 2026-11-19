@@ -3,7 +3,7 @@
 """
 feifei.py —— 讯飞 AI 学习机「飞飞币」每日自动签到 / 明细查询 / 通知推送
 
-版本：R1.0.9（2026-11-15 R1.0.9：与 Loon 通知加固版对齐；R1.0.0 首个版本）
+版本：R1.1.0（2026-11-19 R1.1.0：新增「补签」——漏跑时补上、已签则静默；R1.0.0 首个版本）
 仓库：https://github.com/onshine/ScriptHubs
 
 特点
@@ -41,7 +41,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-SCRIPT_VERSION = "1.0.9"
+SCRIPT_VERSION = "1.1.0"
 API_HOST = "https://api.xunfeixxj.com"
 APPID = "H5APP"
 UA = ("Mozilla/5.0 (iPhone; CPU iPhone OS 16_6_1 like Mac OS X) "
@@ -458,9 +458,17 @@ def cmd_cron(args, config_path):
         py, os.path.join(SCRIPT_DIR, "feifei.py"), log)
     if os.path.abspath(config_path) != os.path.abspath(DEFAULT_CONFIG):
         cmd = cmd.replace("sign", "-c %s sign" % config_path, 1)
-    line = "%s %s  # feifei-cron 飞飞币每日签到" % (expr, cmd)
-    _crontab_write("\n".join(kept + [line]).strip() + "\n")
-    print("✅ 已安装定时任务：\n   %s\n   日志：%s" % (line, log))
+    lines = ["%s %s  # feifei-cron 飞飞币每日签到" % (expr, cmd)]
+    if args.backup:
+        if len(args.backup.split()) != 5:
+            raise SystemExit("❌ 补签表达式也必须是 5 段，例如 \"30 12 * * *\"")
+        cmd_b = cmd.replace("sign", "sign --quiet-if-signed", 1)
+        lines.append("%s %s  # feifei-cron 飞飞币补签（已签则静默）" % (args.backup, cmd_b))
+    _crontab_write("\n".join(kept + lines).strip() + "\n")
+    print("✅ 已安装定时任务：")
+    for ln in lines:
+        print("   " + ln)
+    print("   日志：%s" % log)
     print("   提示：crontab 精度只到分钟；若系统时间非东八区，脚本按手机/服务器本地时区判断「今天」。")
 
 
@@ -481,6 +489,8 @@ def main():
                     help="附带最近 N 条收入明细（默认 10）")
     ap.add_argument("--claim-tasks", action="store_true", help="顺带领取「可领取」状态的任务奖励")
     ap.add_argument("--no-notify", action="store_true", help="只打印，不推送")
+    ap.add_argument("--quiet-if-signed", action="store_true",
+                    help="「今日已签到」时不推送（用于补签场次，避免重复打扰）")
     ap.add_argument("--token", help="import 用：直接给 Authorization")
     ap.add_argument("--har", help="import 用：从 HAR 抓包文件提取 Token")
     ap.add_argument("--name", help="import 用：账号备注名")
@@ -488,6 +498,7 @@ def main():
     ap.add_argument("--show", action="store_true", help="cron 用：查看")
     ap.add_argument("--remove", action="store_true", help="cron 用：移除")
     ap.add_argument("--log", help="cron 用：日志文件路径")
+    ap.add_argument("--backup", help='cron 用：补签场次表达式，如 "30 12 * * *"（当天已签则静默）')
     args = ap.parse_args()
 
     cfg = load_config(args.config)
@@ -543,6 +554,11 @@ def main():
     print("\n" + "=" * 46)
     print(content)
     print("=" * 46)
+
+    all_signed = bool(results) and all(st.startswith("☑️") for _, st, _ in results)
+    if getattr(args, "quiet_if_signed", False) and all_signed:
+        print("\n补签场次：今日已签到，静默退出（不推送）")
+        sys.exit(1 if failed else 0)
 
     only_err = (cfg.get("notify") or {}).get("only_on_error")
     if not args.no_notify and not (only_err and not failed):

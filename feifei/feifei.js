@@ -1,8 +1,10 @@
 /*
  * feifei.js —— 讯飞 AI 学习机「飞飞币」每日自动签到（Loon / Surge / Stash 通用脚本）
  *
- * 版本：R1.0.9
- * 更新：2026-11-15 R1.0.9 通知加固：启动打印通知环境（$notification/$notify 是否存在），
+ * 版本：R1.1.0
+ * 更新：2026-11-19 R1.1.0 支持「补签」：iOS 后台挂起导致主任务漏跑时，第二趟
+ *       （默认 12:30）自动补上；补签趟在「今日已签到」时全程静默，不重复打扰。
+ *       R1.0.9 通知加固：启动打印通知环境（$notification/$notify 是否存在），
  *       兼容 QX 的 $notify，并延迟 800ms 再 $done()（避免 Loon 提前销毁上下文把通知丢掉）。
  *       R1.0.8 通知排版重做：余额/连签/今日可赚 一行一目了然，7 天签到压缩成
  *       「10● 11● 12○」并标注月份，明细标题去掉「完成…任务奖励」前后缀，账号名进标题。
@@ -29,7 +31,7 @@
  * 通知：Loon 系统通知 + 可选 Bark / Telegram
  */
 
-var SCRIPT_VERSION = "1.0.9";
+var SCRIPT_VERSION = "1.1.0";
 var API = "https://api.xunfeixxj.com";
 var UA = "Mozilla/5.0 (iPhone; CPU iPhone OS 16_6_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148";
 var KEY_TOKEN = "feifei_token";
@@ -97,7 +99,8 @@ function readArg() {
   if (!a || typeof a !== "object") return {};
   if (Array.isArray(a)) {
     if (a.length === 1 && a[0] && typeof a[0] === "object" && !Array.isArray(a[0])) return a[0];
-    return { token: a[0], bark_url: a[1], tg_bot: a[2], tg_chat: a[3], details: a[4], claim_tasks: a[5] };
+    return { token: a[0], bark_url: a[1], tg_bot: a[2], tg_chat: a[3], details: a[4],
+             claim_tasks: a[5], quiet: a[6] };
   }
   return a;
 }
@@ -348,6 +351,8 @@ function notifyTG(title, content) {
     return;
   }
   var detailsN = Number(arg.details || 5);
+  var quiet = arg.quiet === true || String(arg.quiet || "false").toLowerCase() === "true";
+  log("模式: " + (quiet ? "补签（已签到则静默）" : "主任务"));
   var claimTasks = arg.claim_tasks === true || String(arg.claim_tasks || "false").toLowerCase() === "true";
 
   accounts.forEach(function (a) {
@@ -382,6 +387,12 @@ function notifyTG(title, content) {
     }
     pushBody = sub ? (sub + (body ? "\n\n" + body : "")) : body;
     log("结果: " + pushBody.replace(/\n+/g, " / ").slice(0, 160));
+
+    var allSigned = results.every(function (r) { return /已签到/.test(r.status || ""); });
+    if (quiet && allSigned) {          // 补签趟：本来就没漏，别打扰
+      log("补签趟：今日已签到，静默退出");
+      return Promise.resolve();
+    }
     safeNotify(title, sub, body);
     return Promise.all([notifyBark(title, pushBody), notifyTG(title, pushBody)]);
   }).then(function () {
